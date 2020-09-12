@@ -1,0 +1,81 @@
+---
+title: 'Homework 1: Intro to R'         
+author: "Quentin D'Arcy"
+date: "9/12/2020"
+output: 
+  html_document:
+    theme: journal
+    highlight: tango
+
+
+---
+
+# Let's take a peek at some earthquakes!
+
+##  Question 1: Load and identify the data
+```{r data_ID}
+#load the earthquake data
+data(quakes)
+
+#take a look at the data structure
+str(quakes)
+
+#and a look at the summary
+summary(quakes)
+```
+
+## Question 2: Show the longitude of the recorded earthquakes in the data set  
+<p style="color: red; font-weight: bold"> Warning: This is a lot of data! </p>
+```{r longitude_data}
+#Show the entirety of the longitude column
+quakes$long
+```
+
+## Question 3: What would the longitude data look like if we took out the duplicates?
+```{r duplicates_stink}
+#Assign the unique values from the "long" column to a new vector
+duplicates_stink <- unique(quakes$long)
+
+#Show the new, truncated "long" column
+duplicates_stink
+```
+
+Looks like we have 605 unique longitudes from which data was taken (meaning we had 395 duplicate longitudes)
+
+## Question 4: How many unique stations are there?
+```{r station_time}
+
+#Find the unique stations
+unique_stations <- unique(quakes$stations)
+
+#Use the length() function to return the number of unique stations
+length(unique_stations)
+```
+So now we know we had 102 different stations from which data was recorded. Super handy for tidying up data!
+
+## Question 5: What is the range of depths where the quakes occur?
+```{r depth_range}
+#Use the range() function to find the range of depths where the quakes were found
+#ommitting any NA's that might be in the "depths" column
+range(quakes$depth, na.rm = TRUE)
+```
+Here we can see that the quakes were record anywhere between 40km and 680km deep (Unfortunately the data doesn't include units so I'm just guessing its km's based on other earthquake data running around out there).
+
+## Extra Credit: Where was the earthquake of the largest magnitude found
+```{r pop_pop}
+#Find out what the largest magnitude in the list (ignoring NA's) was and set it to its own vector 
+max_magnitude <- max(quakes$mag, na.rm = TRUE)
+
+#Use the match() function to find out what the index number for the maximum magnitude is
+max_index <- match(max_magnitude, quakes$mag)
+max_index
+
+#Now we that we know the index we can pull the rest of the data in to a new dataframe
+max_location <- quakes[max_index,]
+max_location
+
+```
+<p> Here we can see that the location of the largest quake was at station #122 at coordinates <span style="font-family: courier">(-15.56, 167.62)</span> at a depth of 127km (again, unit assumed for depth) </p>
+
+The beauty of this is that no matter how the dataset changes this chunk will always be able to find out the relevant info about the largest magnitude earthquake!
+
