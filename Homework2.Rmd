@@ -1,0 +1,467 @@
+---
+title: 'Homework 2: Sampling and Iteration in the Tidyverse'         
+author: "Quentin D'Arcy"
+date: "9/24/2020"
+output: 
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: true
+      smooth_scroll: true
+    theme: journal
+    highlight: tango
+
+
+---
+
+# Set 1: Some Data with Flippers
+### 1a) Load the penguin data
+```{r Penguin_ID}
+#Load the library
+library(palmerpenguins)
+```
+
+### 1b) Show the head of the penguins dataset
+```{r penguins_head}
+#Show the head of the dataset
+head(penguins)
+```
+
+### 1c) Lets take a look at the penguins dataset
+```{r penguins_structure}
+#Show the structure "penguins"
+str(penguins)
+
+#Show a summary of the data
+summary(penguins)
+```
+
+<b>There are a few things that we can learn from this data: </b>
+
+* This dataset is coming in as a tibble instead of a basic data.frame so we   will be able to use our various tidyverse functions on it without           needing to convert it. 
+
+* The data itself shows observations collected on 3 separate species of penguins found on 3 separate islands between 2007 and 2009. These observations include bill length (mm), bill depth (mm), flipper length (mm), and body mass (g) of both male and female penguins.
+
+* Another important thing to take note about this data is that it includes some NA values. Those NA values will have to be accounted for before trying to do much with the data. 
+
+### 1d) Bill Depth Quantiles
+
+From the summary above we can also see that the first quartile (in this cause our quantiles are based on quarters) for bill depth is <b>15.60mm</b> and the 3rd is <b>18.70mm</b>. The median (Q2) is <b>17.30mm</b>.
+
+This means that 25% of the penguins sampled had Bill Depths between <b>15.60mm</b> and the minimum value of <b>13.10mm</b>.
+
+It also means that 25% of the penguins sampled had Bill Depths between <b>18.70mm</b> and the maximum value of <b>21.50mm</b>
+
+Additionally we can say that 50% of our penguins have Bill Depths somewhere between <b>15.60mm</b> and <b>18.70mm</b> (our IQR)
+
+*****
+
+# Set 2: Time for dplyr!
+I'm going to start with loading the tidyverse here to make sure I have all the packages I'll need going foward
+```{r tidyverse_load}
+#I don't like how it looks with the full tidyverse output
+# when it loads here, so I'm going to suppress the messages
+options(tidyverse.quiet = TRUE)
+
+#I'll do the same thing for the summarize() function so it doesn't
+#report that it is ungrouping (again I don't like the look of it)
+options(dplyr.summarise.inform = FALSE)
+
+#load the tidyverse
+library(tidyverse)
+```
+### 2a) Find the mean of a vector that has NA values
+```{r vector_mean}
+#Create the vector
+avg_vec <- c(1,4,7,NA,9)
+
+#Find the mean of the vector, removing NA values
+mean(avg_vec, na.rm = TRUE)
+```
+
+### 2b) What is the mean, SD, and median of body mass (g) across the penguins?
+``` {r body_mass_analysis}
+#set a vector to work with (easier than working with the subset from penguins)
+body_mass <- penguins$body_mass_g
+
+#find the mean of the body mass
+mean(body_mass, na.rm = TRUE)
+
+#find the stdev of the body mass
+sd(body_mass, na.rm = TRUE)
+
+#find the median of the body mass
+median(body_mass, na.rm = TRUE)
+
+
+```
+
+And here are our results for the simple analysis of the body mass (g) of the penguins:
+
+* <b>Mean</b> = `r mean(body_mass, na.rm = TRUE)` g
+
+* <b>Standard Deviation</b> = `r sd(body_mass, na.rm = TRUE)` g
+
+* <b>Median</b> = `r median (body_mass, na.rm = TRUE)` g
+
+### 2c) How do these quantities differ by species?
+``` {r species_analysis, warning = FALSE}
+#Set a tibble to work with
+species_analysis <- penguins %>%
+  
+  #group by species
+  group_by(species) %>% 
+
+  #Summarize back our results
+  summarize(mean_bm = mean(body_mass_g, na.rm = TRUE),
+            stdev_bm = sd(body_mass_g, na.rm = TRUE),
+            median_bm = median(body_mass_g, na.rm = TRUE))
+  
+#show off our new tibble
+species_analysis
+
+```
+
+Here we see that the mean of the body mass is highest for the <i>Gentoo</i> species and lowest for the <i>Adile</i> species. 
+
+We can also note that the <i>Gentoo</i> species has the most variation in the data while the <i>Chinstrap</i> species has the least variation.
+
+### 2d) What about the same analysis for the penguins on Biscoe Island
+``` {r biscoe_time}
+#Set a tibble to work with
+Biscoe_analysis <- penguins %>% 
+  
+  #group by species
+  group_by(species) %>% 
+  
+  #filter for only Biscoe Island
+  filter(island == "Biscoe") %>% 
+
+  #Summarize back our results
+  summarize(mean_bm = mean(body_mass_g, na.rm = TRUE),
+            stdev_bm = sd(body_mass_g, na.rm = TRUE),
+            median_bm = median(body_mass_g, na.rm = TRUE))
+
+#show off our new tibble
+Biscoe_analysis
+```
+
+There are a couple of things that I notice here with this analysis:
+
+* First we can see that the <i>Chinstrap</i> species is completely absent, meaning that there is no data on <i>Chinstrap</i> penguins on Biscoe island
+
+  + That either means there are no members of that species found on Biscoe Island or that the team decided not to collect data on them for one reason or another
+  
+  
+* Secondly we can see that the analysis for <i>Gentoo</i> shows the same values for mean, sd, and median. This is because the only data we have on <i>Gentoo</i> is from Biscoe Island, so it matches the overall analysis
+
+### 2e) Make a "species-island" column in penguins
+```{r species_island}
+#Add a species island column to Penguins
+SI_penguins <- penguins %>% 
+  
+  #narrow down the columns a bit (Had to cut out some data from the tibble
+  #so the new column is easily visible in rmarkdown)
+  select(species,island) %>% 
+
+  #combine the two columns in to a new column
+  mutate(species_island = paste(species,island, sep = "_"))
+
+SI_penguins
+```
+
+*****
+
+# Set 3: A Little Light Plotting
+### 3a) Flipper Length distribution by species
+What does the distribution of Flipper lengths look like for each species on each island?
+``` {r Flipper_Dist}
+#change the margin dimensions so we can see the tick names better
+par(mar=c(10, 4.1, .5, .5))
+
+#plot it (hiding the x-axis label because you can't read it)
+boxplot(flipper_length_mm ~ paste(species,island, sep = "."), 
+        data = penguins, 
+        las = 2, 
+        xlab = "", 
+        ylab = "flipper length (mm)")
+
+#write the x-axis label so its actually legible (native r plotting is a little annoying)
+mtext(text="Species.Island", side=1, line=8)
+```
+
+### 3a Extra Credit) Redo the "Species_Island" column with the [backslash] n seperator
+```{r EC_species_island}
+#Add a species island column to Penguins
+EC_species_island <- penguins %>% 
+  
+  #narrow down the columns a bit (Had to cut out some data from the tibble
+  #so the new column is visible)
+  select(species,island) %>% 
+  
+  #combine the two columns in to a new column
+  mutate(species_island = paste(species,island, sep = "\n"))
+
+EC_species_island
+```
+I'm pretty sure this is supposed to separate our new column by a new line after the species like this:
+
+Chinstrap
+
+Dream
+
+However the way the tibble is being read out by r it isn't applying the newline operator and simply keeping the input string?
+
+### 3b)Relationship  between average flipper length and average body mass by species and island
+For this I think the easiest way to visualize these relationships is with two separate plots
+
+```{r avg_data}
+#set a tibble to work with
+avg_data <- penguins %>% 
+  group_by(species, island) %>% 
+  mutate(average_flipper_length = mean(flipper_length_mm, na.rm = TRUE),
+         average_body_mass = mean(body_mass_g, na.rm = TRUE),
+         Species_Island = paste(species,island, sep = "/"))
+
+#change the margin dimensions so we can see the tick names better
+par(mfrow = c(1,2),
+    mar=c(10, 4.1, 1.5, .5))
+
+
+#Average Flipper Length
+boxplot(average_flipper_length ~ Species_Island, 
+        data = avg_data, 
+        las = 2, 
+        xlab = "", 
+        ylab = "Average flipper length (mm)")
+
+#Rewrite the x-axis so its legible
+mtext(text="Species/Island", side=1, line=8)
+
+#Average Body Mass 
+boxplot(average_body_mass ~ Species_Island, 
+        data = avg_data, 
+        las = 2, 
+        xlab = "", 
+        ylab = "Average body mass (g)")
+
+#Rewrite the x-axis so its legible
+mtext(text="Species/Island", side=1, line=8)
+
+```
+```{r make_it_a_bar_plot, include = FALSE}
+#Here's how I managed to make the box plots up there in to bar plots but its messy
+#There's got to be a better way to do this part!
+
+#set a tibble to work with
+avg_data <- penguins %>% 
+  group_by(species, island) %>% 
+  mutate(average_flipper_length = mean(flipper_length_mm, na.rm = TRUE),
+         average_body_mass = mean(body_mass_g, na.rm = TRUE),
+         Species_Island = paste(species,island, sep = "/"))
+
+#Find what the index is for each unique value of average flipper length
+search_vec <- match(unique(avg_data$average_flipper_length),avg_data$average_flipper_length)
+
+#set up the plot parameters
+par(mar = c(10,4.1,1.5,.5))
+
+#Plot the unique values for average flipper length and label them according
+#to the matching Species/Island (based on iterating through the species island 
+#column using the search_vec index). Length is set to the search_vec length
+#to avoid NA's (everything goes NA if that parameter exceeds the number of unique
+#values)
+barplot(unique(avg_data$average_flipper_length), 
+    names.arg = avg_data$Species_Island[search_vec[1:length(search_vec)]],
+    las = 2, 
+    xlab = "", 
+    ylab = "Average flipper length (mm)")
+
+#re-write the x-axis so its legible
+mtext(text="Species/Island", side=1, line=8)
+```
+
+Here we have two different plots of the average flipper length and body mass for each unique species_island (removing NA values). With a quick glance we can see that the <i> Gentoo </i> species has much larger average body mass and flipper length.
+
+Interestingly it looks like the <i> Adelie </i> species on Torgersen has slightly longer flippers on average than do their Dream and Biscoe counterparts.
+
+### 3c) Make the same average value plot for the rest of the measurements
+
+I'll do the same for the rest of the penguin measurements
+```{r rest_of_the_data}
+#set a tibble to work with
+avg_data <- penguins %>% 
+  group_by(species, island) %>% 
+  
+  #add our new average value columns and a species/island column for each value
+  mutate(average_bill_length= mean(bill_length_mm, na.rm = TRUE),
+         average_bill_depth = mean(bill_depth_mm, na.rm = TRUE),
+         Species_Island = paste(species,island, sep = "/"))
+
+#change the margin dimensions so we can see the tick names better
+par(mfrow = c(2,2),
+    mar=c(1, 4.1, 1.5, .5))
+
+
+#Average Bill Length
+boxplot(average_bill_length ~ Species_Island, 
+        data = avg_data, 
+        las = 2, 
+        xlab = "", 
+        ylab = "Average bill length (mm)")
+
+#Rewrite the x-axis so its legible
+mtext(text="Species/Island", side=1, line=8)
+
+#Average bill depth 
+boxplot(average_bill_depth ~ Species_Island, 
+        data = avg_data, 
+        las = 2, 
+        xlab = "", 
+        ylab = "Average bill depth (mm)")
+
+#Rewrite the x-axis so its legible
+mtext(text="Species/Island", side=1, line=8)
+
+
+```
+
+From this average data we see that the <i> Chinstrap </i> penguins have the longest average bills with <i> Gentoo </i> penguins close behind. Interestingly, however, the <i> Gentoo </i> average bill depth is shallower than the other 2 species.
+
+So it would appear that the most massive, longest flipper penguins (<i> Gentoo </i>) have the shallowest bills while the least massive, shortest flipper penguins (<i> Adelie </i>) have some of the deepest bills
+
+To clarify these results it would important to know if the <i> Gentoo </i> and <i> Chinstrap </i> species exist on other islands. If they do we should collect data on the <i> Gentoo </i> and the <i> Chinstrap </i> from more than just Biscoe/Dream respectively. If these penguins live on other islands the data we have now can't really be used to infer population traits because we have only sampled from one island each. 
+
+# Set 4: Let's get ready to simulate
+### 4a) Grab Bill Length data and put it into an object
+I'm also going to tidy up the data at this step
+```{r Gentoo_time}
+#pull the column for Gentoo bill lengths (ignoring NA's in a different way)
+Gentoo_Bill <- penguins %>% 
+  filter(species == "Gentoo" & bill_length_mm != "NA") %>% 
+  pull(bill_length_mm)
+Gentoo_Bill
+```
+
+### 4b) Calculate the standard error of the mean 10 times using replicate()
+```{r Standard_error_Gentoo}
+#Calculate the SE of the Mean using the formula SE = sd/sqrt(n)
+gentoo_se <- replicate(n = 10, (sd(Gentoo_Bill)/sqrt(length(Gentoo_Bill))))
+gentoo_se
+```
+
+Here we have the standard error of the mean of this sample 10 times. Since our sample data set isn't changing the number is the same every time, simply replicated 10 times
+
+If we wanted a better estimate of the standard error we could get 10 bootstrap SEs
+```{r Bootstrap_SE}
+one_boot <- function(bootData){
+  sample(bootData, size = length(bootData), replace = TRUE)
+}
+
+gentoo_bs <- replicate(n = 10, sd(replicate(1000, mean(one_boot(Gentoo_Bill)))))
+gentoo_bs
+```
+
+(I wasn't really sure what the question was asking so I included both just in case)
+
+### 4c) Use Map_DF() to create a data frame with the mean and sd of different sample sizes
+```{r map_DF}
+#Use map_df() to create a new dataframe with the mean and sd of different
+#sample sizes
+gentoo_df <- map_df(5:100, ~data.frame(mean_vec = mean(Gentoo_Bill[1:.x]), 
+                                         st_dev = sd(Gentoo_Bill[1:.x]),
+                                         sample_size = .x))
+gentoo_df
+
+```
+
+### 4d) Compare the relationship between sample size vs SD and sample size vs SE
+```{r comparison}
+#Add the SE to the Gentoo dataframe
+full_df <- gentoo_df
+
+#Map on a new column for SE at each sample size
+full_df$SE <- c(map_dbl(1:length(full_df$sample_size), ~(full_df$st_dev[.x]/sqrt(full_df$sample_size[.x]))))
+
+full_df
+
+#set new plotting parameters
+par(mfrow = c(1,2))
+
+#plot the SD vs sample size
+plot(st_dev ~ sample_size, 
+     data = full_df,
+     type = "l",
+     main = "SD vs Sample Size",
+     xlab = "Sample Size",
+     ylab = "SD")
+
+#plot the SE vs sample size
+plot(SE ~ sample_size, 
+     data = full_df,
+     type = "l",
+     main = "SE vs Sample Size",
+     xlab = "Sample Size",
+     ylab = "SE")
+
+#reset the parameters
+par(mfrow = c(1,1))
+                        
+```
+
+So here are the differences between the standard deviation and standard error when compared to the sample size.
+
+The first thing that I noticed is that both of the graphs fluctuate heavily at the start but eventually trend towards a limit. This limit for the standard deviation graph is about 2.9 while the Standard Error is about .29
+
+It is interesting that these are off by a factor of 10. This makes sense as the formula for the Standard Error of the Mean is the standard deviation divided by the square root of the current sample size. This means that at 100 samples our Standard Error should be the Standard Deviation divided by 10 (which is the pattern we see here)
+
+It also makes sense that both values (SD and SE) would be higher at the beginning of sampling than at the end as we expect the variation in our dataset to decrease as the number of samples increases.
+
+
+# Extra Credit: Make some good looking tables
+I ran out of time so I applied gt() to an exisiting table
+
+I couldn't figure out a clean way to make a table for the average bill length/depth for each different sex, species, and island. It would be possible to make a different data frame for each individual trait (see the code chunk below) and then asssemble them in to a single table but that seems kinda memory heavy / not all that elegant.
+
+
+```{r the_ugly}
+#load the gt library (quietly)
+options(gt.quiet = TRUE)
+library(gt)
+
+#Get values for a lot of stuff
+Male_properties <- penguins %>%
+  
+  #filter out the NA's for these three
+  filter(sex != "NA" & sex == "male") %>% 
+  
+  #calculate average values
+  summarize(avg_male_bd = mean(bill_depth_mm),
+            avg_male_bl = mean (bill_length_mm))
+```
+
+```{r using_gt}
+#Grabbing the top 20 values from penguins based on bill length
+gt_vec <- slice_max(penguins, n = 20, order_by = bill_length_mm)
+  
+#Use gt to set and center a title, rewrite the column names, and set up row striping
+gt (gt_vec) %>% 
+  tab_header(
+    title = "Penguin Data"
+  ) %>% 
+  opt_align_table_header(align = "center") %>% 
+  cols_label(species = "Species",
+             island = "Island",
+             bill_length_mm = "Bill Length",
+             bill_depth_mm = "Bill Depth",
+             flipper_length_mm ="Flipper Length",
+             body_mass_g = "Body Mass",
+             sex = "Sex",
+             year = "Year",
+             ) %>% 
+  opt_row_striping(row_striping = TRUE)
+  
+  
+```
+
+This is a table to the 20 longest bill penguins!
