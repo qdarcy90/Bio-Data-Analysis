@@ -1,0 +1,366 @@
+---
+title: 'Homework 2: Sampling and Iteration in the Tidyverse'         
+author: "Quentin D'Arcy"
+date: "9/24/2020"
+output: 
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: true
+      smooth_scroll: true
+    theme: journal
+    highlight: tango
+
+
+---
+```{r load_stuff, echo = FALSE, results = "hide" }
+#I don't like how it looks with the full tidyverse output
+# when it loads here, so I'm going to suppress the messages
+options(tidyverse.quiet = TRUE)
+
+#I'll do the same thing for the summarize() function so it doesn't
+#report that it is ungrouping (again I don't like the look of it)
+options(dplyr.summarise.inform = FALSE)
+
+#load the tidyverse
+library(tidyverse)
+
+
+#load gt for pretty tables
+library(gt)
+```
+# Set 1: Sample Properties
+### 1a) Say "Vole Vasopressin" 10 times fast
+
+I made it about 2 in before calling it Volsopressin, so my future as a vole doctor isn't looking promising...
+
+### 1b)What is the mean, median, sd, and IQR of the vole sample
+```{r vole_parameters}
+#Set up the vole vasopressin data frame
+vole_vaso <- c(98,96,94,88,86,82,77,74,70,60,
+           59,52,50,47,40,35,29,13,6,5)
+
+#Find the various sample parameters
+vole_param <- c(mean(vole_vaso),
+                median(vole_vaso),
+                sd(vole_vaso),
+                IQR(vole_vaso)) 
+vole_param
+```
+Here are the parameters for these Vole Vasopressin levels
+
+* <b>Mean</b> = `r round(vole_param[1],2)` 
+
+* <b>Median</b> = `r round(vole_param[2],2)`
+
+* <b>Standard Deviation</b> = `r round(vole_param[3],2)`
+
+* <b>IQR</b> = `r round(vole_param[4],2)`
+
+### 1c) What is the standard error of the mean (do this with a formula!)
+Using the formula SE = sd/sqrt(n)
+``` {r vole_SE}
+#Using the formula SE = sd/sqrt(n) calculate the SE of the mean
+vole_SE <- (sd(vole_vaso)/sqrt(length(vole_vaso)))
+vole_SE
+```
+Here we have the Standard Error of the Mean:
+
+* <b>Standard Error of the Mean</b> = `r round(vole_SE,2)`
+
+### 1d) What does the standard error of the mean tell you about our estimate of the mean values of the population of Vole Vasopressin
+Assuming that this sample of vole vasopressin levels is reasonably representative of the population, we have the following Confidence Intervals:
+
+<b> 66% Confidence Interval </b> : `r round(vole_param[1] - vole_SE, 2)` to `r round(vole_param[1] + vole_SE,2)`
+
+<b> 95% Confidence Interval </b> : `r round(vole_param[1] - (2 * vole_SE),2)` to `r round(vole_param[1] + (2 * vole_SE),2)`
+
+Here we can say that if we were to sample the population many, many times then 2/3rds of the time our 66% confidence interval will contain the true value of the mean.
+
+We can say the same thing for the 95% confidence interval in that 95% of the time our 95% confidence interval will contain the true value of the mean
+
+# Set 2: Sample size for upper quartiles
+### 2a) Use sample() to get just one resample with a sample size of 10. What is its Upper Quartile 
+```{r Sample_Voles}
+#Calculate the resample
+vole_sample <- sample(vole_vaso, size = 10, replace = TRUE )
+vole_sample
+
+#Calculate the upper quartile
+vole_Upper_Quartile <- quantile(vole_vaso, probs = .75)
+vole_Upper_Quartile
+
+```
+Here we have a single re-sampling of the original sample of the population. To do this the Vole Vasopressin data was randomly sampled 10 times (with replacement) to create a new vector.
+
+This new vector has its own quartiles as well, as we can see from its upper quartile: `r round(vole_Upper_Quartile,2)`
+
+### 2b) Build an initial data frame for simulations with the sample sizes 5 through 20
+```{r inital_df}
+vole_sim <- data.frame(sample_size = 5:20)
+vole_sim
+```
+
+### 2c) Use this data frame to get simulated upper quartiles at each sample size 1,000 times
+```{r UQ_Sim}
+vole_UQ_sim <- vole_sim %>% 
+  
+  #for each sample size
+  rowwise() %>% 
+  
+  #Replicate calculating the upper quartile 1000 times in a normal distribution
+  #based around the mean and sd of vole_vaso and have it spit out a df
+  
+  summarize(sample_size,
+            Upper_Quartile = replicate(1000, quantile(rnorm(n = sample_size,
+                                                   mean = mean(vole_vaso),
+                                                   sd = sd(vole_vaso)), probs = .75)) %>% mean())
+
+gt (vole_UQ_sim) %>%
+  #Set up the tab header
+  tab_header(
+    title = "Upper Quartile per Sample Size") %>% 
+  
+  #Align it to the center
+  opt_align_table_header(align = "center") %>% 
+  
+  #Label the columns
+  cols_label(Upper_Quartile = "Upper Quartile",
+             sample_size = "Sample Size") %>% 
+  
+  #Stripe the rows to make it more readable
+  opt_row_striping(row_striping = TRUE)
+
+```
+
+Here have our table of upper quartiles at each sample size up to 20 samples
+
+### 2d) With ggplot, make a guess as to the best sample size for estimating the upper quartile of the population
+```{r ggplot_guess}
+
+#Plot the table above
+UQ_Plot <- ggplot(data = vole_UQ_sim,
+                        mapping =aes(x = sample_size,
+                                     y = Upper_Quartile,
+                                     color = Upper_Quartile,
+                                     fill = Upper_Quartile))
+UQ_Plot +
+  geom_line(size = 1)
+
+```
+
+So here is the data that we've collected so far across our 20 sample range, and as we can see there is still alot of fluctation in the values for the UQ of this data set. I believe that a line graph here is the easiest way to view this data pattern and included color for UQ as a quick visual
+
+This suggests that we aren't quite at our optimal sample size. To figure out what it is I'm going to extend our simulation out to 200 samples
+```{r 100_samples}
+#Set up our inital df for sample sizes 5 through 200
+vole_sim <- data.frame(sample_size = 5:200)
+
+vole_UQ_sim <- vole_sim %>% 
+  
+  #for each sample size
+  rowwise() %>% 
+  
+  #Replicate calculating the upper quartile 1000 times in a normal distribution
+  #based around the mean and sd of vole_vaso and have it spit out a df
+  
+  summarize(sample_size,
+            Upper_Quartile = replicate(1000, quantile(rnorm(n = sample_size,
+                                                   mean = mean(vole_vaso),
+                                                   sd = sd(vole_vaso)), probs = .75)) %>% mean())
+#Plot the table above
+UQ_Plot <- ggplot(data = vole_UQ_sim,
+                        mapping =aes(x = sample_size,
+                                     y = Upper_Quartile,
+                                     color = Upper_Quartile,
+                                     fill = Upper_Quartile))
+#take a look at a line graph with the 50 sample mark 
+UQ_Plot +
+  geom_line(size = 1) +
+  geom_vline(linetype = "dashed",
+             color = "red",
+             xintercept = 150)
+
+
+```
+
+With this plot we can see that the UQ data seems to start to level out at about 78 around a sample size of 150 samples.
+
+This means that this would be the (guesstimated) sample size where we balance precision with the excessive collection of samples.
+
+### 2e) Plot the SE of the estimate of the upper quantile by sample size
+```{r se_Plot}
+#Set up our inital df for sample sizes 5 through 200
+vole_sim <- data.frame(sample_size = 5:200)
+
+vole_UQ_sim <- vole_sim %>% 
+  
+  #for each sample size
+  rowwise() %>% 
+  
+  #Replicate calculating the standard error of the UQ 1000 times in a normal distribution
+  #based around the mean and sd of vole_vaso and have it spit out a df
+  
+  summarize(sample_size,
+            UQ_SE = replicate(1000, quantile(rnorm(n = sample_size,
+                                                   mean = mean(vole_vaso),
+                                                   sd = sd(vole_vaso)), probs = .75)) %>% sd())
+#Plot the table above
+UQ_Plot <- ggplot(data = vole_UQ_sim,
+                        mapping =aes(x = sample_size,
+                                     y = UQ_SE,
+                                     color = UQ_SE,
+                                     fill = UQ_SE))
+#take a look at a line graph with the 50 sample mark 
+UQ_Plot +
+  geom_line(size = 1) +
+  geom_vline(linetype = "dashed",
+             color = "red",
+             xintercept = 150)
+
+
+```
+
+Here we have the graph of the SE of the UQ across different sample sizes.
+
+Again, we see a similar pattern to the regular UQ data in that the curve seems to level off. This time it levels off around a SE of the UQ of about 3.5 (I feel that this line plot is the best way to visualize it)
+
+I would feel comfortable again with a sample size around 150 samples, however in this case I might even push that number a bit more towards 200 as we still see a somewhat significant decrease in SE towards that end of the graph.
+
+All things considered this graph matches well with our previous UQ vs Sample Size graph
+
+# Set 3: GGplot
+## 3a) A little bit of setup
+```{r code_setup}
+#libraries
+
+#Our best friend for all things piping and simming
+library(dplyr)
+
+#A package that is used to read rectangular data (e.g., outputed excel tables like .csv)
+library(readr)
+
+#Plotting
+library(ggplot2)
+
+#A package full of tools that help deal with factors (i.e., categorical variables)
+library(forcats)
+
+#set the ggplot theme
+theme_set(theme_bw(base_size=12))
+
+#import the tidy'd ice melting data in to a df
+ice <- read_csv("http://biol607.github.io/homework/data/NH_seaice_extent_monthly_1978_2016.csv") %>%
+  
+  #Add a Month Name column and reorder to go by month
+  mutate(Month_Name = factor(Month_Name),
+         Month_Name = fct_reorder(Month_Name, Month))
+```
+### 3b) Make a boxplot showing variability in sea ice extent every month
+```{r ice_box}
+#Plot the table above
+ice_box <- ggplot(data = ice,
+                        mapping = aes(x = Month_Name,
+                                     y = Extent))
+
+#Take a look at the boxplot (ggplot is the absolute best)
+ice_box +
+  geom_boxplot()
+
+```
+
+Here is our boxplot. Each box represents data taken from `r min(ice$Year)` to `r max(ice$Year)`
+
+### 3c) Use dplyr to get the annual minimum sea ice extent and plot it by year
+```{r ice_year}
+#Create a dataframe to work with
+ice_year <- ice %>% 
+  
+  #Group by the year
+  group_by(Year) %>% 
+  
+  #Find the minimum for that year
+  summarize(annual_min = unique(min(Extent)))
+
+#Plot the annual min across year
+UQ_Plot <- ggplot(data = ice_year,
+                        mapping =aes(x = Year,
+                                     y = annual_min))
+
+#take a look at a line graph with the 50 sample mark 
+UQ_Plot +
+  geom_line(size = 1)
+```
+
+Here is a line graph showing the decrease in the annual minimum ice extent for `r min(ice$Year)` to `r max(ice$Year)` 
+
+### 3d) Plot sea ice by year with different lines for different months then use cut interval to show plots by season
+```{r cut_time}
+#Create a df to work with
+ice_cut <- ggplot(data = ice,
+                  mapping = aes(x = Year,
+                                y = Extent))
+
+#plot it with a line plot setting the color equal to the Month_Name
+ice_cut +
+  geom_line(size = 1,
+            aes(color = Month_Name))+
+  #Set a discrete color for each line plot
+  scale_color_discrete() +
+  #cut the facet in to seasons and label accordingly
+  facet_wrap(~cut_interval(Month, 
+                           n = 4, 
+                           labels = c("Winter", "Spring", "Summer", "Fall")))
+```
+
+### 3e) Make a line plot of sea ice by month with different lines as differnt years
+```{r ice_Plots}
+#Create a df to work with
+ice_cut <- ggplot(data = ice,
+                  mapping = aes(x = Month_Name,
+                                y = Extent,
+                                color = Year,
+                                group = Year))
+
+#Set up a different theme
+theme_set(theme_dark(base_size = 12))
+
+#plot it with a line plot setting the color equal to the Month_Name
+ice_cut +
+  geom_line()+
+  scale_color_viridis_c()+
+  labs(title = "Arctic Sea Ice Size by Year: {frame_time",
+       x = "Month",
+       y = "Extent",
+       color = "Year")
+ 
+```
+
+### 3f) Animate it!
+```{r animate}
+#load the library
+library(gganimate)
+library(gifski)
+library(transformr)
+#Create a df to work with
+ice_cut <- ggplot(data = ice,
+                  mapping = aes(x = Month_Name,
+                                y = Extent,
+                                color = Year,
+                                group = Year))
+
+#Set up a different theme
+theme_set(theme_dark(base_size = 12))
+
+#plot it with a line plot setting the color equal to the Month_Name
+ice_cut +
+  geom_line()+
+  scale_color_viridis_c()+
+  labs(title = "Arctic Sea Ice Size by Year: {frame_along}",
+       x = "Month",
+       y = "Extent",
+       color = "Year") +
+  transition_reveal(Year)+
+  geom_point(aes(group = seq_along(Year))) +
+  ease_aes('linear')
+```
