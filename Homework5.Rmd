@@ -1,0 +1,620 @@
+---
+title: 'Homework 5: Correlation and Regression'         
+author: "Quentin D'Arcy"
+date: "10/12/2020"
+output: 
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: true
+      smooth_scroll: true
+    theme: journal
+    highlight: tango
+
+
+---
+```{r load_stuff, echo = FALSE, results = "hide" }
+#I don't like how it looks with the full tidyverse output
+# when it loads here, so I'm going to suppress the messages
+options(tidyverse.quiet = TRUE)
+
+#I'll do the same thing for the summarize() function so it doesn't
+#report that it is ungrouping (again I don't like the look of it)
+options(dplyr.summarise.inform = FALSE)
+
+
+#load the tidyverse
+library(tidyverse)
+
+
+#load gt for pretty tables
+library(gt)
+```
+
+# 1: Correlation (W&S Chapter 16)
+
+First we're gonna load our data
+```{r brain_load}
+#For safety
+setwd(here::here())
+
+#Load in our brain data
+brain <- read.csv("data/Brain_Data.csv")
+
+#Visualize it
+head(brain)
+```
+## 1a) Display the association between the two variables in a scatter plot
+```{r GM_Prof}
+#Make a point plot with our data
+brain_plot <- ggplot(data = brain,
+                   aes(x = proficiency,
+                       y = greymatter))+
+  geom_point()
+
+brain_plot
+```
+
+## 1b) Calculate the correlation between second language proficiency and gray-matter density
+```{r brain_cor}
+
+#find the correlation coefficent value
+brain_cor <- cor(brain$proficiency, brain$greymatter)
+```
+
+So here we've calculated the correlation using our linear model of the relationship between language proficiency (cm3) and greymatter density  (# of languages known).
+
+Based on the calculated correlation coefficent of <b> `r brain_cor` </b> it looks like there is a pretty strong correlation between the two.
+
+However, are we able to reject our null hypothesis (i.e., there is no correlation between language proficiency and greymatter density)and show this is a true correlation and not due to random chance?
+
+# 1c) Test the null hypothesis of zero correlation
+Fortunately we've kind of already done this (Thanks R!)
+```{r brain_t}
+#First create a linear model for our data
+brain_mod <- lm(greymatter ~ proficiency, data = brain)
+
+#Grab the coefficent summary our linear model
+gt(as_tibble(summary(brain_mod)$coef)) %>% 
+  #Set up the tab header
+  tab_header(
+    title = "Correlation summary") %>% 
+  
+  #Align it to the center
+  opt_align_table_header(align = "center") %>% 
+
+  #Stripe the rows to make it more readable
+  opt_row_striping(row_striping = TRUE)
+```
+What this gives us is a table summarizing all our correlation data. Included in this summary is the result of t-tests for each of the correlation coefficients. 
+
+Here we can see that our P-values (calculated from the t-test) for each of our co-efficients is extremely small (much less than P = .05), meaning that we can reject our null hypothesis of zero correlation.
+
+# 1d) What assumptions are we making here?
+First, we are assuming that the sample of individuals here represents a random sample from the population (i.e., the language proficient). 
+
+Additionally we have assumed that the data has a bivariate normal distribution (i.e., both our greymatter/proficiency measurements are both normally distributed with a linear relationship between each other)
+
+# 1e) Does the scatter plot support these assumptions?
+Looking again the the original scatter plot:
+
+```{r plot_check}
+brain_plot +
+  geom_point()
+```
+
+The first thing to notice is what the points on the plot <b> don't </b> do. Specifically we can see that they don't:
+
+* Show a "funnel" pattern, where the variance in y depends on the value of x 
+
+* Show any large outliers that would push the data our of normality
+
+What we do see, however, is a linear relationship between our two variables, which supports our assumptions.
+    
+# 1f) Do the results demonstrate that second language proficienccy affects gray-matter density in the brain?
+No, these results demonstrate a potential correlation between second language proficency and grey-matter density in the brain. It does not mean that there is a causation between the two.
+
+That being said, I think that this data does demonstrate that there is a fairly strong, positive correlation (r = `r brain_cor`) between second language proficiency and gray-matter density. We have been able to show evidence that the assumptions on which our model was made are well met, as well as proved that the relationship between the two variables is not due to random chance
+
+HOWEVER, just because this data demonstrates such a relationship does not mean that we can unequivocally state that this correlation holds throughout the population. More tests will be needed to verify that this correlation isn't due to some external validity issue.
+
+Note: The sample size of n = 22 is just around the considered "minimum" for an accurate t-test, but with p-values so low I think the results would still be enough to reject our  with an increase in n.
+
+# 2: Correlation
+First we're gonna load our data
+```{r liver_load}
+#For safety
+setwd(here::here())
+
+#Load in our brain data
+liver <- read.csv("data/liver_data.csv")
+
+#Visualize it
+head(liver)
+```
+## 2a) Calculate the correlation coefficient between the taurocholate unbound fraction and the concentration
+```{r coeff_calc}
+#The correlation coefficient
+liver_cor <- cor(liver$concentration, liver$unboundFraction)
+liver_cor
+```
+
+So the correlation coefficent is `r liver_cor`
+
+## 2b) Plot the relationship between the two variables in a graph
+```{r liver_plot}
+#Make a point plot with our data
+liver_plot <- ggplot(data = liver,
+                   aes(x = concentration,
+                       y = unboundFraction))+
+  geom_point()
+
+liver_plot
+```
+
+## 2c) Why does the plot look "maximally strong" when the correlation coefficent isn't 1
+
+I'm going to preface the following analysis with the fact that our sample size is really small (n = 5) so the analysis will be of questionable use.
+
+In this case I think we can blame the final high concentration as being an outlier and exerting an influence on the data. We can analyze it's influence:
+
+```{r in_check}
+#Create a linear model 
+liver_mod <- lm(unboundFraction ~ concentration, data = liver)
+
+
+#Plot the data's normalized residuals versus the leverage of the measurements
+plot(liver_mod, which = 5)
+
+#Plot the Cook's distance (extra evidence)
+plot(liver_mod, which = 4)
+```
+
+And we can see that it is indeed exerting more influence then what would be assumed given a random sample.
+
+## 2d) What steps would you take with these data to meet the assumptions of correlation analysis
+Since we have shown that the fifth measurement has such a high influence on the overall data we could potentially correct this by removing it from our calculations. In that case:
+
+```{r new_coeff}
+#Create our new df
+new_liver <- liver[-5,]
+
+#Now get the correlation
+new_liver_cor <- cor(new_liver$concentration, new_liver$unboundFraction)
+new_liver_cor
+```
+
+As we can see, we now have a correlation coefficient closer to 1 at `r new_liver_cor` 
+
+Now if we look back at the influence plots we can also see that 1 is very close to being an outlier, removing it would bring us to an r2 value
+
+```{r bad_1}
+bad_1 <- liver[2:4,]
+bad_1 <- cor(bad_1$concentration, bad_1$unboundFraction)
+bad_1
+```
+
+So this gets us even closer to a maximally strong correlation but there's a point where we are just pruning data to hit a number.
+
+Realistically this data is questionable in its raw form. The experiment uses 5 separate rats and uses single concentration data for each to map the decrease in unbound fraction. However, without some way to normalize the influence of different individuals on this relationship we are probably committing some grevious measurement error.This error would cause the correlation coefficent to under-represent the true correlation between the two variables.
+
+There are ways we could correct (or <b> disattuenuate </b>) the error but they are 1) long and convoluted and 2) probably won't have much significance with this low a sample size
+
+# 3 Correlation SE
+Let's setup this data a little bit
+```{r happy_cats}
+#Make a df to work with
+happy_cats <- data.frame(cats = c(-.30,.42,.85,-.45,.22,-.12,1.46,-.79,.40,-.07),
+                         happiness_score = c(-.57,-.10,-.04,-.29,.42,-.92,.99,-.62,1.14,.33))
+
+gt(happy_cats) %>% 
+  #Set up the tab header
+  tab_header(
+    title = "Data summary") %>% 
+  
+  #Align it to the center
+  opt_align_table_header(align = "center") %>% 
+
+  #Stripe the rows to make it more readable
+  opt_row_striping(row_striping = TRUE)
+```
+
+## 3a) Are these two variables correlated? What does a test show you?
+First are these two variables correlated via cor()
+```{r cats_cor}
+#check the correlation
+cats_cor <- cor(happy_cats$cats, happy_cats$happiness_score)
+cats_cor
+```
+
+Based on a correlation coefficient of `r cats_cor` (but without doing any other analysis) I would say this data suggests there is a fairly strong, positive correlation between cats and happiness
+
+However, can reject the null hypothesis of this data?
+```{r test_cats}
+#First we will create a linear model of the correlation
+cats_mod <- lm(happiness_score ~ cats, data = happy_cats) 
+
+#Then we'll look at the t / p values of the cats correlation coefficent to #see if we can reject the idea that these values could occur if there
+#was no relationship between happiness and cats
+gt(as_tibble(summary(cats_mod)$coef)) %>% 
+  #Set up the tab header
+  tab_header(
+    title = "Correlation summary") %>% 
+  
+  #Align it to the center
+  opt_align_table_header(align = "center") %>% 
+
+  #Stripe the rows to make it more readable
+  opt_row_striping(row_striping = TRUE)
+```
+Based on this information we can apparently safely reject the null hypothesis as the chance of it being true is small (p < .04)
+
+## 3b) What is the SE of the correlation based on the info from cor.test()?
+
+```{r se_corr}
+#Take a look at the correlation statistics
+cor_se <- cor.test(happy_cats$cats, happy_cats$happiness_score)
+cor_se
+
+#Using the SEr formula we can calculate the standard error of the
+#correlation (using df's from the correlation)
+se_r <- sqrt((1-cor_se$estimate)/ cor_se$parameter)
+
+se_r
+```
+Here we find the standard error of the correlation to be `r se_r`
+
+## 3c) What is the simulated SE?
+```{r simulate_SE}
+#Making a function to output the correlation coefficent from a #resampling
+cor_sample <- function(x, y){
+  
+  #Resample the x vector
+  x_samp = sample(x,
+                  size = length(x), 
+                  replace = TRUE)
+  
+  #Resample the y vector
+  y_samp = sample(y,
+                  size = length(y),
+                  replace = TRUE)
+  
+  #Find the correlation between the resamples 
+  #(I divide by 2 here because I resampled both columns seperately and 
+  #have to account for the DoF changes)
+  resample <- cor(x_samp, y_samp)/2
+  
+  #Return the correlation coefficient
+  return(resample)
+                         
+}
+
+#Simulate the correlation coefficient 1000 times and get the SE
+SE_sim <- sd(replicate(n = 1000, 
+                         cor_sample(happy_cats$cats,
+                                    happy_cats$happiness_score)))
+
+SE_sim
+```
+
+Here our simulated standard error is `r SE_sim`
+
+# 4) W&S Chapter 17
+First lets load up the data
+```{r plant_data}
+#For safety
+setwd(here::here())
+
+#Load in our plant data
+plants <- read.csv("data/plant_data.csv")
+
+#Visualize it
+head(plants)
+```
+
+## 4a) Draw a scatter plot of the data. Which variable should be the explanatory / response variable
+
+In this case the thing that we are altering (Explanatory variable) is the number of nutrients added so the response variable would be the number of plant species
+
+```{r plant_plot}
+#Make a point plot with our data
+plant_plot <- ggplot(data = plants,
+                   aes(x = nutrients,
+                       y = species))+
+  geom_point()
+
+plant_plot
+```
+
+## 4b) What is the rate of change (slope) in the data. Provide an SE for your estimate
+To do this we will create a linear regression model and use that to get a coefficient estimate and it's standard error
+```{r plant_mod}
+
+#First we will create a linear model of the correlation
+plants_mod <- lm(species ~ nutrients, data = plants) 
+
+#Grab the intercept and slope of the new linear regression line
+gt(as_tibble(summary(plants_mod)$coef)) %>% 
+  #Set up the tab header
+  tab_header(
+    title = "Correlation summary") %>% 
+  
+  #Align it to the center
+  opt_align_table_header(align = "center") %>% 
+
+  #Stripe the rows to make it more readable
+  opt_row_striping(row_striping = TRUE)
+```
+
+As we can see here the slope of line of best fit is about -3.34, which means that (according to our model) the number of species decreases at a rate of 3.34 species per additional nutrient treatment.
+
+We can also see that this estimate has a standard error of ~ 1.10.
+
+## 4c) Add the least-squares regression line to your scatter plot. What fraction of the variation in the number of plant species is "explained" by the number of nutrients added?
+Add a regression line and calculate the r-squared value
+```{r reg_line}
+plant_plot + 
+  geom_smooth(method = 'lm')
+
+plant_r2 <- summary(plants_mod)$r.squared
+plant_r2
+```
+
+The fraction of the variation in the number of plant species is "explained" by the number of nutrients added is `r plant_r2`
+
+## 4d) Test the null hypothesis of no treatment effect on the number of plant species
+We've already done this by calculating the linear model estimate
+```{r plant_test}
+gt(as_tibble(summary(plants_mod)$coef)) %>% 
+  #Set up the tab header
+  tab_header(
+    title = "Correlation summary") %>% 
+  
+  #Align it to the center
+  opt_align_table_header(align = "center") %>% 
+
+  #Stripe the rows to make it more readable
+  opt_row_striping(row_striping = TRUE)
+```
+What we can see is that the probability that the null hypothesis is true (i.e., that the number of nutrients has no impact on the number of species in a plot) is <b> .016% </b>. That chance is low enough that I feel comfortable in saying the null hypothesis isn't correct.
+
+# 6 W&S Chapter 17 - 30
+First lets load the data
+```{r teeth_load}
+#For safety
+setwd(here::here())
+
+#Load in our plant data
+teeth <- read.csv("data/teeth_data.csv")
+
+#Visualize it
+head(teeth)
+```
+
+## 6a) What is the approximate slope of the regression line
+```{r teeth_mod}
+
+#First we will create a linear model of the correlation
+teeth_mod <- lm(dateOfBirth ~ deltaC14, data = teeth) 
+
+#Grab the intercept and slope of the new linear regression line
+summary(teeth_mod)$coeff
+```
+Here we can see the estimate of the slope is about -.05 
+
+## 6b) Which pair of lines show the confidence bands and what do they tell us?
+
+The lines closer to the regression line represent the confidence bands of our fit interval. What they mean is that there is a 95% chance that the population average falls within this range. 
+
+## 6c) Which pair of lines show the prediction interval and what do they tell us?
+
+The lines further away from the regression line represent the prediction interval. What they mean is that when a new data point is added there is a 95% chance it will fall within this interval. This is based on our linear regression model.
+
+## 6d) Recreate the chart above
+```{r recreate}
+#So we don't end up screwing up our imported data set
+teeth_copy <- teeth
+
+#Create our original plot
+teeth_plot <- ggplot(data = teeth,
+                    mapping = aes(x = deltaC14, 
+                                   y = dateOfBirth))+
+  geom_point(alpha = .5)
+
+#calculate our fit interval (confidence bands)
+fit_teeth <- predict(teeth_mod,interval = "confidence") %>%
+  
+  #Spit out a tibble with renammed variables
+  as_tibble() %>% 
+  rename(lwr_ci = lwr,
+         upr_ci = upr)
+
+teeth_copy <- cbind(teeth_copy, fit_teeth)
+
+#Prediction Interval
+predict_teeth <- predict(teeth_mod,
+                         interval = "prediction") %>% 
+  as_tibble() %>% 
+  rename(lwr_pi = lwr,
+         upr_pi = upr,
+         fit_pi = fit)
+
+teeth_copy <- cbind(teeth_copy, predict_teeth)
+
+
+
+ggplot(data = teeth_copy,
+       mapping = aes( x = deltaC14,
+                      y = dateOfBirth))+
+  #Prediction interval
+  geom_ribbon(mapping = aes(ymin = lwr_pi,
+                            ymax = upr_pi),
+              alpha = .5,
+              color = "black")+
+  
+  #Fit interval (just coefficent error / precision)
+  geom_ribbon(mapping = aes(ymin = lwr_ci,
+                            ymax = upr_ci),
+              color = "blue",
+              alpha = .5)+
+  
+  stat_smooth(method = "lm", color = "red")
+
+```
+Here is our ribbon reconstruction of the chart (fit interval is blue, PI interval is black, and the regression line is red)
+
+# Extra Credit
+
+----
+
+#5 W&S Chatper 17 - 25
+First lets load the data
+```{r beetle_load}
+#For safety
+setwd(here::here())
+
+#Load in our plant data
+beetle <- read.csv("data/beetle_data.csv")
+
+#Visualize it
+head(beetle)
+```
+
+## 5a) Use these results to calculate the residuals
+```{r residual_calc}
+#Calculate the regression model
+beetle_mod <- lm(wingMass ~ hornSize, data = beetle)
+
+#Compare the coefficients with the ones give
+summary(beetle_mod)$coeff
+
+#Calculate the residuals
+beetle_res <- resid(beetle_mod)
+
+#Our residuals
+gt(as_tibble(beetle_res)) %>% 
+  #Set up the tab header
+  tab_header(
+    title = "Residual summary") %>% 
+  
+  #Align it to the center
+  opt_align_table_header(align = "center") %>% 
+
+  #Stripe the rows to make it more readable
+  opt_row_striping(row_striping = TRUE)
+```
+
+And here is table of residuals based on this regression model
+
+## 5b) Plot the residuals
+```{r residual_plot}
+#Plot just the residuals
+hist(beetle_res)
+```
+
+## 5c) Did we meet the main assumptions for linear regression?
+Lets start by looking at the Residuals vs the fitted values
+```{r beetle_ass}
+#Plot the residuals vs the fitted data to see if there is a pattern
+plot(beetle_mod, which = 1)
+```
+
+So there is definitely a lot of residual variance, but what about the QQ plot
+
+```{r beetle_QQ}
+plot(beetle_mod, which = 2)
+```
+
+This provides evidence that there is a normally distributed, linear relationship between X and Y (based on how close their quantiles fall in this QQ plot). So this plot supports the assumption of bivariate normal distribution.
+
+The other assumption we need to confirm is that there isn't a largely influential outlier skewing our model. First lets look at the cooks distance
+
+```{r cooks_D}
+plot(beetle_mod, which = 4)
+```
+
+Ok so we definitely have some large outliers here, lets check on their Cook's distance versus their normalized leverage 
+
+```{r beetle_lev}
+plot(beetle_mod, which = 6)
+```
+
+Alright, data point 19 looks to have an incredibly high influence on the rest of the data.
+
+## 5d) What should we do?
+What I would is remove observation 19 from this predicted dataset as an undue outlier. It is kind of weird that we generated this data and now need to remove a predicted data point but it makes sense because of the sample size. 
+
+To visualize everything lets just plot it all
+```{r beetle_master}
+#So we don't end up screwing up our imported data set
+beetle_copy <- beetle
+
+#Create our original plot
+beetle_plot <- ggplot(data = beetle,
+                    mapping = aes(x = hornSize, 
+                                   y = wingMass))+
+  geom_point(alpha = .5)
+
+#calculate our fit interval (confidence bands)
+fit_beetle <- predict(beetle_mod,interval = "confidence") %>%
+  
+  #Spit out a tibble with renammed variables
+  as_tibble() %>% 
+  rename(lwr_ci = lwr,
+         upr_ci = upr)
+
+beetle_copy <- cbind(beetle_copy, fit_beetle)
+
+#Prediction Interval
+predict_beetle <- predict(beetle_mod,
+                         interval = "prediction") %>% 
+  as_tibble() %>% 
+  rename(lwr_pi = lwr,
+         upr_pi = upr,
+         fit_pi = fit)
+
+beetle_copy <- cbind(beetle_copy, predict_beetle)
+
+
+
+ggplot(data = beetle_copy,
+       mapping = aes( x = hornSize, 
+                      y = wingMass))+
+  #Prediction interval
+  geom_ribbon(mapping = aes(ymin = lwr_pi,
+                            ymax = upr_pi),
+              alpha = .5,
+              color = "black")+
+  
+  #Fit interval (just coefficent error / precision)
+  geom_ribbon(mapping = aes(ymin = lwr_ci,
+                            ymax = upr_ci),
+              color = "blue",
+              alpha = .5)+
+  
+  stat_smooth(method = "lm", color = "red")+
+  
+  geom_point(data = beetle_copy)
+
+```
+
+So the important thing here is that we can see that the outlier that we identified while validating our assumptions is just about as low in our predicted interval as it could go. 
+
+Our predicted interval is calculated by the upper and lower 95% "confidence interval" for our prediction. Since it looks like that point falls even slightly below our lower "PI" it can be safely removed as an outlier to clean up our demonstrated data set.
+
+In publish-able terms, there is a "statistically significant" chance that the value would not occur in our population and can thus be ignored.
+
+All that being said this really is just some bad luck with our random 19 points. If we increased the sample count we'd see trends much more in line with our normal linear regression trends.
+
+One last point is that we are probably looking at some external validity issues with the scope of this particular study (just based on the experimental design)
+
+##5e) What else misbehaved
+I covered this mostly during assumption testing but:
+
+-There was a lot of variance in a couple of spots on t residual vs fitted values plot
+
+-The cook's distance looked wacky for a couple of points, implying issues with the outliers
+
+-When we looked at normalize leverage the insane pull that data point 19 exerts is a pretty good misbehavior
+
+-Looking at the prediction interval with the points plotted on it shows us very visually what went wrong
