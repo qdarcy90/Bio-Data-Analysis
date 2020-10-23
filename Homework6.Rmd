@@ -1,0 +1,208 @@
+---
+title: 'Homework 6: Inference and Likelihood'         
+author: "Quentin D'Arcy"
+date: "10/21/2020"
+output: 
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: true
+      smooth_scroll: true
+    theme: journal
+    highlight: tango
+
+
+---
+```{r load_stuff, echo = FALSE, results = "hide" }
+#I don't like how it looks with the full tidyverse output
+# when it loads here, so I'm going to suppress the messages
+options(tidyverse.quiet = TRUE)
+
+#I'll do the same thing for the summarize() function so it doesn't
+#report that it is ungrouping (again I don't like the look of it)
+options(dplyr.summarise.inform = FALSE)
+
+
+#load the tidyverse
+library(tidyverse)
+
+library(MASS)
+library(profileModel)
+#load gt for pretty tables
+library(gt)
+```
+
+
+# 1 Inductive or Deductive Reasoning
+Personally I would say that I gravitate towards deductive reasoning instead of inductive reasoning. While I appreciate the objectivity of inductive reasoning (i.e., you allow the observations to develop your theory) I find that it can lead me down too many branching paths at once. Keeping in mind the need to be objective and not force data to match a theory, I think that the directedness of deductive research can be a more powerful tool than the more open inductive approach. 
+
+It is very important, however, that a deductive investigator be willing to discard theories that are proven wrong as well as take an un-biased view of the data presented by an experiment. If you can keep your own bias at the front of your mind when interpreting results I think the objectivity of deduction can be maintained. 
+
+The benefit of deductive reasoning is that it allows us to develop targeted experiments aimed at a certain goal. This means that the data that we receive will be understood in a certain context, making it easier (in my eyes) to analyze and interpret. 
+
+As long as we don't cherrypick data in order to make our deductions true (I'm looking at you Ancient Alien Theory) I think it can be a more practically relevant and useful method of reasoning.
+
+# 2 Popperian Falsification vs Lakatos's View
+I more strongly relate to Popper's Falsification as opposed to Lakato's View of a research program because I think that Popperian Falsification is the more objective and detatched of the two methods. By continually testing and re-testing our hypothesis until something fails we can more systematically approach the study of nature. 
+
+Lakatos seems obsessed with the idea of a "progressive" research program in which each new theory in the sequence must have excess emprirical content over its predecessor (i.e., predict novel facts). This view focus only on progress and can lead to the inherent issue with deductive reasoning: hypothesis bias. 
+
+Lakatos himself implies that in order for a research program to stay "progressive" certain novel facts must be ignored:
+
+"The discovery of an inconsistency—or of an anomaly—[need not] immediately stop the development of a programme: it may be rational to put the inconsistency into some temporary, ad hoc quarantine, and carry on with the positive heuristic of the programme. (FMSRP: 58)"
+
+This seems dangerous to me. Designing a research program so that it must either 1) make novel discoveries or 2) be discarded seems like exactly the attitude that has pushed the modern science community down the P-hacking path. 
+
+Because of that I have to say I agree with Popper when he says:
+
+“Whenever a theory appears to you as the only possible one, take this as a sign that you have neither understood the theory nor the problem which it was intended to solve.”
+― Karl Popper
+
+# 2b) How does your own research program fit into these?
+The research program I'm working under has a set of outlined theories about the current statues of autocrine feedback loops in pre-fibrotic prostate cells and the potential for over-activity of these feedback loops to create clinical fibrosis. 
+
+The way that we are approaching this research is through 4 main theories based on previous observations. This program is also written so that it will build on itself but each individual theory remains relevant for testing, even if previous hypotheses are proven incorrect.
+
+Because of this I think that my program more closely resembles Popperian Falsification as the aim of program is not centered around a main, hard-core theory that requires "progression" but is instead centered around falsifying our hypotheses and accepting those that pass rigor.
+
+# 2c) What about another philosopher?
+
+### Thomas Kuhn (1922-1996)
+Kuhn's main focus is on the idea of scientific progress, specifically he rejected the traditional view that scientific discovery would always plod along at a slow but steady rate and instead posited that scientific development has alternating "normal" and "revolutionary" periods. He was also a big proponent of "incommensurability", the idea that previous paradigms in science are not compatible with each other:
+
+"… the physical referents of these Einsteinian concepts are by no means identical with those of the Newtonian concepts that bear the same name. (Newtonian mass is conserved; Einsteinian is convertible with energy. Only at low relative velocities may the two be measured in the same way, and even then they must not be conceived to be the same.) (1962/1970a, 102)"
+
+This means that as science advances we can not use the same parameters of past to determine the value of future predictions. This idea led Kuhn to rejecting Convergent Realism, or the idea that science shows ever improving approximation to the truth.
+
+Personally, while I think that Kuhn makes an interesting argument about the stop-and-go nature of scientific achievement, I disagree with his overarching thinking. If we take a historical look back then we can indeed see time periods that seem to represent a lack of scientific achievement and others that seem to represent a boom of technology but that is too simplistic a view.
+
+I think that this is mainly due to painting the past of scientific achievement with too broad a brush. For example, many people think that the "dark ages" between the fall of Rome (476 CE) and the Renaissance (early 14th century) represents a time of complete scientific illiteracy in Europe. 
+
+All of the advancements of the golden age of Rome are left forgotten in piles of rubble and the people returned to toil in squalor for the better part of the next millennium. However, that ignores an amazing advancement in everything from agricultural practices to architectural techniques.
+
+Sure, if we compare these ~900 years to the ~200 years of the Renaissance we would be tempted to point out the lack of scientific "revolution", but we would be ignoring the additive effect of the "dark age" achievements on the success of the Renaissance. 
+
+Because of this I think that Kuhn's argument ignores the constant evolution of science by "binning" it's achievements together.
+
+# Puffers!!!
+
+```{r load_data}
+#For safety
+setwd(here::here())
+
+#Load in our brain data
+fish <- read.csv("data/fish_data.csv")
+
+#Visualize it
+head(fish)
+```
+
+# Grid Sampling!
+I'll make a function to figure out what the likelihood is and then get the MLE
+```{r fish_grid}
+#create a likelihood function to figure out the predictor 
+likhood_fun <-  function(slope, intercept, res_sd){
+  
+  #Our linear regression formula
+  new_fish <-  slope + intercept * fish$resemblance
+  
+  #Sum our results (log likelihood)
+  sum(dnorm(fish$predators, new_fish, res_sd, log = TRUE))
+}
+
+#Create our data generation across our 3 variables
+fish_dist <-  crossing(slope = seq(1,5, by = .1),
+                       intercept = seq(1,4, by = .1),
+                       res_sd = seq(1,5,b = .1)) %>% 
+  rowwise() %>% 
+  mutate(loglik = likhood_fun(slope, intercept, res_sd)) %>% 
+  ungroup()
+
+fish_dist
+
+#MLE
+fish_MLE <-  fish_dist %>% 
+filter(loglik == max(loglik))
+
+#Compare to the lm
+fish_lm <- lm(predators ~ resemblance, data = fish)
+
+#Check it out
+summary(fish_lm)
+fish_MLE
+
+```
+As we can see the values all line up fairly evenly!
+
+# Surfaces
+Create a likelihood 2-d likelihood surface for slope and intercept
+```{r surface}
+#Create a grid surface, fixing our 3rd variable at its MLE
+fish_surface <-  crossing(slope = seq(1,5, by = .1),
+                       intercept = seq(1,4, by = .1),
+                       res_sd = fish_MLE$res_sd) %>% 
+  rowwise() %>% 
+  mutate(loglik = likhood_fun(slope, intercept, res_sd)) %>% 
+  ungroup()
+
+fish_surface
+
+#plot the sd likelihood surface
+ggplot(data= fish_surface,
+       mapping = aes(x=slope,
+                     y=intercept,
+                     fill = loglik)) +
+  geom_raster() +
+  scale_fill_viridis_c()
+
+```
+
+# GLM!
+Now we'll compare it to GLM and 
+```{r glm_data}
+
+#initial visualization to determine if lm is appropriate
+fish_plot <- ggplot(data=fish, aes(x=resemblance, y=predators)) + 
+  geom_point()
+fish_plot
+
+#fit that model
+fish_mod <- glm(predators ~ resemblance, 
+               family = gaussian(link = "identity"), 
+               data=fish)
+  
+  
+#Check Assumptions
+#Grab our predicted values and our residuals
+fish_fit <- predict(fish_mod)
+fish_res <- residuals(fish_mod)
+
+#Quantile plot to ensure a decent relationship
+qplot(fish_fit, fish_res)
+
+#Check the QQ plot to make sure its linear
+qqnorm(fish_res)
+
+#Plot the profile as an unsigned square root of the deviance to ensure
+#that there isn't anything weird going on 
+plot(profile(fish_mod))
+
+#LRT test of model
+fish_mod_null <- glm(predators ~ 1, 
+               family = gaussian(link = "identity"), 
+               data=fish)
+  
+anova(fish_mod_null, fish_mod, test = "LRT")
+
+#t-tests of parameters
+summary(fish_mod)
+
+#To get the confidence intervals
+fish_CI <- profileModel(fish_mod,
+                     objective = "ordinaryDeviance",
+                     quantile = qchisq(0.95, 1))
+
+plot(fish_CI)
+
+```
+
