@@ -1,0 +1,322 @@
+---
+title: 'Homework 7: CV and Bayes'         
+author: "Quentin D'Arcy"
+date: "10/27/2020"
+output: 
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: true
+      smooth_scroll: true
+    theme: journal
+    highlight: tango
+
+
+---
+```{r load_stuff, echo = FALSE, results = "hide" }
+#I don't like how it looks with the full tidyverse output
+# when it loads here, so I'm going to suppress the messages
+options(tidyverse.quiet = TRUE)
+
+#I'll do the same thing for the summarize() function so it doesn't
+#report that it is ungrouping (again I don't like the look of it)
+options(dplyr.summarise.inform = FALSE)
+
+
+#load the tidyverse
+library(tidyverse)
+library(ggplot2)
+#Load the other necessary libraries
+library(rsample)
+library(boot)
+library(modelr)
+library(MASS)
+library(profileModel)
+library(AICcmodavg)
+#load gt for pretty tables
+library(gt)
+```
+# 0) Load the data
+First we need to load the data
+```{r load_data}
+#For safety
+setwd(here::here())
+
+#Load in our brain data
+hormone <- read.csv("data/hormone_data.csv")
+
+#Visualize it
+head(hormone)
+```
+
+# 1) Create models with different polys
+
+Create different polynomial fits and compare the r2 values
+```{r poly_fit}
+#Create our dataframe
+hormone_mods <- data.frame(poly_fit = c(1:5)) %>% 
+  
+  #Go rowwise through it
+  rowwise() %>% 
+  
+  #Add each lm as a member of a list column and grab the r2 values
+  mutate(model = list(lm(ventilation ~ poly(progesterone, poly_fit),
+                    data = hormone)),
+         r2_value = summary(model)$r.squared)
+
+#Display our data (models don't look nice in a table)
+gt(hormone_mods[,-2]) %>% 
+  
+  #Set up the tab header
+  tab_header(
+    title = "Effect of various polynomial fits on r2 Value") %>% 
+  
+  #Align it to the center
+  opt_align_table_header(align = "center") %>% 
+
+  #Stripe the rows to make it more readable
+  opt_row_striping(row_striping = TRUE)
+
+```
+So we can see that the r2 value increases as we increase the polynomials used to calculate the regression are increased. This means that the higher polynomial models fit our data better (i.e., we see more of the variance in progesterone being explained by the change in ventilation levels). This is a double edged sword, however, because as we get better at explaining the variance in our data set we get worse at explaining the variance in the population!
+
+# 2) Fit each model with a 5-fold CV
+We'll check the validity of each of these models by checking to see how they preform when compared to a random resampling of our data. By doing this we are able to test how well the model can predict new values.
+
+## 2a) First make a 5-fold CV validation tibble then combine each possible fold with the polynomails 1:5 using tidy::crossing()
+We'll start with our validation table for 1:5
+```{r cv_tibble}
+#Make a folded dataset object
+hormone_fold <- vfold_cv(hormone, v = 5)
+
+#Make our cv table
+hormone_cross <- crossing(polynomial = seq(1,5, by = 1),
+                          hormone_fold)
+
+#Display our data
+gt(hormone_cross[,-2]) %>% 
+  
+  #Set up the tab header
+  tab_header(
+    title = "Cross table") %>% 
+  
+  #Align it to the center
+  opt_align_table_header(align = "center") %>% 
+
+  #Stripe the rows to make it more readable
+  opt_row_striping(row_striping = TRUE)
+
+```
+
+## 2b) Make a list column of fit models against splits
+Now we'll make a list of the coefficents for each split vs each fit model
+```{r map_it}
+#To get the mods list column create a new tibble
+hormone_cv <- hormone_cross %>%
+
+  #Add the list column, using map2 to map our different splits
+  #to each different polynomial and using a linear model with our
+  #polynomial defining what order the fit model is
+  mutate(mods =  map2(splits, 
+                      polynomial,
+                      ~lm(ventilation ~ poly(progesterone, .y),
+                          data = analysis(.x))))
+
+head(hormone_cv)
+```
+
+## 2c) Calculate the RMSE for each fold/polynomial combination
+Now we'll check each individual model for its RMSE to determine which model has the lowest residual error
++
+```{r rmse_hormone}
+hormone_rmse <- hormone_cv %>% 
+  
+  #Add the rsme column
+  mutate(rmse = map2_dbl(splits, mods, 
+                         ~rmse(model = .y, data = assessment(.x) )))
+
+head(hormone_rmse)
+```
+
+## 2d) What is the relationship between polynomial and out-of-sample RMSE
+Now that we have the data all calculated we need to show it
+```{r poly_rmse}
+#Create our final data table
+hormone_results <- hormone_rmse %>% 
+  
+  #For each polynomial
+  group_by(polynomial) %>% 
+  
+  #Tack on a five_fold_score
+  summarise(five_fold_score = unique(mean(rmse)))
+
+#Display our data
+gt(hormone_results) %>% 
+  
+  #Set up the tab header
+  tab_header(
+    title = "Polynomial fit vs RMSE (5-fold)") %>% 
+  
+  #Align it to the center
+  opt_align_table_header(align = "center") %>% 
+
+  #Stripe the rows to make it more readable
+  opt_row_striping(row_striping = TRUE)
+
+ggplot(data = hormone_results,
+          mapping = aes(x = polynomial,
+                        y = five_fold_score))+
+  geom_line()
+```
+So looking at our RMSE table/graph above we can see that the model that has the smallest out-of-sample error is our first order model. This means that the first order linear model is the most useful of the ones we tested as it best matches what our population (potentially) looks like.
+
+
+
+# 3) Compare models and see how they differ from AIC
+Another way to compare how useful our models are is to calculate an AIC table
+```{r AIC_time}
+#Create our new object
+hormone_aic <- data.frame(polynomial = c(1:5),
+                          names = c("linear", 
+                                    "quadratic", 
+                                    "cubic", 
+                                    "quartic", 
+                                    "quintic")) %>% 
+  
+  #Go rowwise through it
+  rowwise() %>% 
+  
+  #Add each lm as a member of a list column
+  mutate(mods = list(lm(ventilation ~ poly(progesterone, polynomial),
+                    data = hormone))) 
+
+#Calculate the AIC table
+aic_table <- aictab(cand.set = hormone_aic$mods, 
+                    modnames = hormone_aic$names)
+#Display our data
+gt(aic_table) %>% 
+  
+  #Set up the tab header
+  tab_header(
+    title = "AIC Table for our hormone data") %>% 
+  
+  #Align it to the center
+  opt_align_table_header(align = "center") %>% 
+
+  #Stripe the rows to make it more readable
+  opt_row_striping(row_striping = TRUE)
+
+```
+Looking at this through the lens of AICc we can see that we still show the linear model to be the best fit for this data as it shows the lowest AICc value. 
+
+As we can also see from this table, the AICc Weight for the linear model is much much larger than any other model at 72%. This means that this model contains 72% of the "predictive power" that this set of models represents.
+
+
+# 5) Grid Sample with Bayes
+## 5a) We are going to start with the Penguin data, finding the average flipper length of Gentoo females
+```{r gentoo_flips}
+
+library(palmerpenguins)
+testpens <- penguins
+#Create a df for the data
+gentoo_flip <- penguins %>% 
+  
+  #Group by female gentoo
+  filter(species == "Gentoo" & sex == "female", na.rm = TRUE) %>% 
+  
+  #Summarise the flipper lengths
+  summarise(flipper_length = flipper_length_mm)
+
+  ggplot()+
+    geom_density(data = gentoo_flip,
+               mapping = aes(x = flipper_length),
+               size = 2,
+               color = "blue")+
+    labs(title = "Flipper Length Distribution")+
+    geom_vline(xintercept = mean(gentoo_flip$flipper_length, na.rm = TRUE),
+               color = "red")+
+    geom_vline(xintercept = c((mean(gentoo_flip$flipper_length, na.rm = TRUE)+ sd(gentoo_flip$flipper_length, na.rm = TRUE)),
+                              (mean(gentoo_flip$flipper_length, na.rm = TRUE)- sd(gentoo_flip$flipper_length, na.rm = TRUE))),
+               color = "green")
+    
+```
+So here we have the plot of flipper_length distribution in Gentoo females (note: The red line is the mean, the green lines are +/- 1 sd)
+
+## 5b) Grid sample around the range of our mean and SD to confirm these numbers
+We'll do the same kind of grid sampling we used for our likelihood analysis (using 100 values around the mean and sd)
+```{r grid_it}
+#Create the grid cross for each value of mean and sd
+flip_grid <- crossing(m = seq(210,220, length.out = 100),
+                        s = seq(2, 6, length.out = 100)) 
+```
+
+## 5c) Write a function for the numerator of Bayes Equation
+This is basically just the likelihood multiplied by our priors for both the mean and the sd (our hypothesis parameters). In this case we'll use the prior provided as well as returning everything as a log (summing rather than multiplying)
+```{r fun_time}
+#Grabbing the vector for the function
+flips <- gentoo_flip$flipper_length
+
+# Write a functionn to get a loglikelihood
+log_numerator <- function(m, s){
+  
+  #Log likelihood of the m and s given our data
+  sum(dnorm(flips, mean = m, sd = s, log = TRUE),
+  
+  #Prior for our mean
+  dnorm(m, 210, 50, log = TRUE),
+  
+  #Prior for our sd
+  dunif(s, 1, 10, log = TRUE)) 
+  
+}
+
+```
+
+## 5d) Put it all together
+Alright, now we have a cross grid and a function, all that's left to do is get the posterior.
+```{r post_it}
+
+#Create a seperate numerator column (to use for full posterior)
+num <- flip_grid %>% 
+  
+  #for each row
+  rowwise() %>%
+  
+  #add on our numerator column
+  mutate(numerator = log_numerator(m = m, s = s))
+
+#Set the denominator
+pd <- log(sum(exp(num$numerator)))
+
+
+#Now calculate the posterior
+post_full <- num %>% 
+  
+  #For each row
+  rowwise() %>% 
+  
+  #Add on the posterior
+  mutate(posterior = numerator - pd)
+
+```
+## 5e) Surface!
+Here's what the posterior surface looks like
+```{r surface}
+#plot the sd likelihood surface
+ggplot(data= post_full,
+       mapping = aes(x=m,
+                     y=s,
+                     fill = posterior)) +
+  geom_raster() +
+  scale_fill_viridis_c()
+```
+# 6) Final Project Thinking
+The dataset that I'm thinking about working with comes from the NIH-mediated genetic cancer database, TCGA. TCGA is an amazing resource for scientists from around the world to upload their cancer data, from clinical histologies to genomic analysis and RNAseq data. Specifically I will be looking at the data from a particular survey of patients with prostate cancer. 
+
+My research is aimed at identifying the underlying signaling mechanisms invloved in the process of fibroblast to myofibroblast phenoconversion in prostate cells. Unfortunately I'm just starting my research and have no data to analyze. Additionally there is not alot of readily available data concerning this area of research, however it has long been known that fibrosis is a symptom that often occurs before and/or concurrent with cancer.
+
+Because of this relationship between fibrosis and cancer I think that it would be worth while to parse out some of the underlying demographic patterns in men with prostate cancer. 
+
+The dataset that I've located is from a survey of 500 men, each with one of 3 different types of prostate cancer. The dataset includes a variety of information about the specifics of the particular disease in each patient as well as over arching demographic data.
+
+My specific question is what effect different demographic parameters have on the occurrence of prostate cancer? Specifically, I will be identifying any patterns between occurrence of particular grades, stages, and types of prostate cancer in certain segments of the population. This could be very useful in giving me clinical context about the patients suffering from prostate disorders.
