@@ -1,0 +1,842 @@
+---
+title: 'Midterm'         
+author: "Quentin D'Arcy"
+date: "11/13/2020"
+output: 
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: true
+      smooth_scroll: true
+    theme: journal
+    highlight: tango
+
+---
+
+```{r load_stuff, echo = FALSE, results = "hide" }
+#I don't like how it looks with the package loading #notifications when it loads here, so I'm going to suppress the #messages
+
+options(tidyverse.quiet = TRUE)
+options(dplyr.summarise.inform = FALSE)
+options(dbplyr.summarise.inform = FALSE)
+options(htmltools.quiet = TRUE)
+
+#load our libraries
+library(tidyverse)
+library(ggplot2)
+library(ggthemes)
+library(visdat)
+library(lubridate)
+library(gridExtra)
+library(gganimate)
+library(gifski)
+library(transformr)
+library(brms)
+library(AICcmodavg)
+#load gt for pretty tables
+library(gt)
+```
+
+# 1) Sampling your system
+
+My work centers around prostate fibrosis, specifically the cell signaling pathways that malfunction in aging prostates and leads to fibroblast-myofibroblast phenoconversion and an increase in extra-cellular (ECM) rigidity (a hallmark of tissue fibrosis). 
+
+This increase in ECM rigidity is largely attributed to a build up of collagen, which is often used as a metric for the extent of the condition. Therefore the variable I would be sampling is extracellular collagen levels.
+
+Prostate fibrosis itself leads to a number of conditions including Lower Urinary Tract Dysfunction (LUTD) and Benign Prostate Hyperplasia (BPH) and is found concomitant with a number of different disorders. 
+
+The population that I would be sampling would be those patient populations that:
+
+* Have been diagnosed with prostate fibrosis 
+
+* Are presenting with disorders known to co-present with prostate fibrosis (e.g., LUTD and BPH)
+
+* Don't present with fibrosis / known concomitant conditions (control) 
+
+Sample design is a bit of a challenge because we need to collect tissue through surgical biopsy in order to test for ECM collagen levels. This isn't usually a problem in other diseases like cancer because surgical excision of the diseased tissue is part of treatment. In prostate fibrosis, however, most patients won't need surgical intervention as in most cases the symptoms are not serious enough to warrant it. Add in the fact that the large majority of patients are in the older demographic (age 55+) and surgical intervention becomes an even less advisable treatment option.
+
+Because of this restriction a large number of the tissue samples that I would be able to collect would be from patients with concomitant conditions that warrant surgical excision / biopsy. This is a rather unavoidable restriction of my study and leads to a sample group that represents a much smaller chunk of the overall human population. At this point I don't think there is much I can do (ethically) to expand the sample group so I will need to qualify any argument I make in the framework of this limited scope. For example, if I am able to correlate the development of prostate fibrosis with the presence of another disease I will have to be careful not to expand any conclusion to the whole population. Any conclusions that are made from this study have to be understood in the clinical context in which they are being made. Fortunately most of the intended audience would have a good understanding of the context of the study.
+
+With all the disclaimers laid out, my specific sampling design would be to sample any patients that presented with fibrosis or LUTD/BPH and compare the level of extracellular collagen to levels of extracellular collagen from normal prostates. I would attempt to stratify my samples to randomly sample patients within certain age ranges (i.e., 55-65, 65-75, 75+), grabbing as many samples as I possibly could. Control samples would be collected from (most likely) deceased patients who's prostate gland would not be effected by the means of death. All samples will need to be analyzed as soon as possible to ensure that the extracellular matrix maintains the state it was in when biopsied. I will attempt to be even in the sampling between age ranges and between control/symptomatic patients so that comparisons can be made easily between sampling groups. 
+
+Because younger patients don't generally present with prostate fibrosis or associated conditions, I will be ignoring anyone under 55. This is done to ensure that the sampled groups don't differ too much from each other. If a 30 year old presented with prostate fibrosis they likely have some systemic disease that is leading to early onset. Additionally having patients so far apart in age means the cellular landscape of the patients will vary wildly, making it difficult to isolate potential correlations between patient groups. 
+
+Sampling for this project is inherently random because we can only work with tissue samples gathered through surgical intervention, which depends on a whole list of things that the patient and their doctor would need to discuss. This leads to a large variability in who actually goes in for surgery or not, meaning we can basically accept any samples that come our way.
+
+As far as the distribution of collagen levels I would expect them to be normally distributed among the population, specifically the >55 age group. If I was looking at all age groups I would still expect a normal distribution, just heavily shifted to the right of an Age vs. Collagen level chart. 
+
+# 2) Data Reshaping and Visulaliztion
+
+## 2a) First we'll load the John's Hopkins Covid data
+```{r covid_load}
+#For safety
+setwd(here::here())
+
+#Load in our brain data
+covid <- read.csv("https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_US.csv", check.names = F) %>% 
+  na.omit() 
+
+```
+
+## 2b) Pivot Time (literally)
+Now we'll create a function that outputs a long-form time series of cumulative and new daily cases in a given state.
+
+```{r time_to_pivot}
+
+#Create a function
+state_cases <- function (state){
+
+  #Pivot the portion of the Covid data we are interested in 
+  covid_long <- pivot_longer(covid[,c(7,12:304)], 
+                               -c(Province_State),
+                               names_to = "date",
+                               values_to = "cummulative_cases") %>% 
+  
+  #Update the date column to a lubridate object
+  mutate(date = mdy(date))
+  
+  #Now create the return object
+  state_tbl <- covid_long %>% 
+    
+    #Filter for the provided state
+    filter(Province_State == state) %>% 
+    
+    #Group the data by their date
+    group_by(date) %>% 
+    
+    #Create a "total cases" column
+    summarize(total_cases = sum(cummulative_cases)) %>% 
+    
+    #Tack on a state indicator column 
+    mutate(state = state,
+           
+           #Add a "new cases" column by calculating the
+           #difference between elements in "total cases"
+           #(offset the first entry to match vector length)
+           new_cases = c(0,diff(total_cases)))
+  
+  #Return the object
+  return(state_tbl)
+}
+
+mass_cases <- state_cases("Massachusetts")
+
+``` 
+
+## 2c) Visualize the data
+```{r visualize_it}
+#Make a visualization function
+state_vis <- function(chosen_state){
+  
+  #Create my Total Cases visualization
+  total_vis <- ggplot(data = chosen_state,
+                mapping = aes(x = date,
+                              y = total_cases,
+                              
+                              #Group and Fill by month to break up the graph
+                              #and make it easier to look at
+                              group = month(date),
+                              fill = month(date)))+
+    #Create an area chart with a small outline
+    geom_area(color = "white",
+              size = .5)+
+    
+    #Update the scale legend to break up by month's charted
+    scale_fill_continuous(breaks = scales::extended_breaks(n = 11),
+                          
+                          #Change the legend title and layout
+                          guide = guide_legend(title = "Month",
+                                               nrow = 4,
+                                               byrow = TRUE)) +
+    #Change the labels
+    labs(title = paste("Total Covid Cases in",unique(chosen_state$state),"in 2020"),
+         x = "Date",
+         y = "Total Cases")+
+    
+    #Give it a little color and edit the gridlines a little
+    theme(panel.background = element_rect(fill = "darkolivegreen3"))
+  
+  #Create the new cases visualization the same way
+  daily_vis <- ggplot(data = chosen_state,
+                      mapping = aes(x = date,
+                                    y = new_cases,
+                                    group = month(date),
+                                    fill = month(date)))+
+    geom_area(color = "white",
+              size = .5)+
+    
+    scale_fill_continuous(breaks = scales::extended_breaks(n = 11),
+                          guide = guide_legend(title = "Month",
+                                               nrow = 4,
+                                               byrow = TRUE))+
+    
+    labs(title = paste("New Daily Covid Cases in",unique(chosen_state$state),"in 2020"),
+         x = "Date",
+         y = "New Daily Cases")+
+    
+    theme(panel.background = element_rect(fill = "darkolivegreen3"))
+  
+  
+  grid.arrange(total_vis, daily_vis, nrow = 2)
+  
+}
+
+state_vis(mass_cases)
+```
+
+## 2d) Combine it all
+
+```{r functional_thing}
+#Chose your state (I want to make this UI but don't know how :( )
+state_choice <- "California"
+
+#Assign it to a variable to pass to visualization
+state_covid <- state_cases(state_choice)
+
+#Visualize it
+state_vis(state_covid)
+
+```
+
+# 3) Inferential Frameworks: Frequentist in the streets, Bayesian in the sheets
+
+After some deep introspection I think I've come to the conclusion that as a scientist I have, out of necessity, adopted a frequentest framework. I have a background in daily air monitoring around the city of Boston and spent the better part of 7 years making sure that the results of the tests that my lab performed were acceptable. I didn't know it at the time but I was being groomed towards the frequentest perspective through daily monitoring of positive control performance, time-to-result data, and inhibition control standards. Each of these had a desired parameter that my lab needed to meet in order to validate the quality of results. When we on-boarded a new lot of reagent I would perform acceptance testing that was designed to ensure that the product would meet specific parameter ranges. So my thinking was centered around the idea I wanted to validate my method through (frequent) testing to ensure that the parameter that I was seeing was within a "true parameter" range.
+
+I think that there is a lot of power (pun intended) in the philosophy of frequentest testing. When you are testing samples with immediate clinical or environmental consequences it's vital that the results you produce (and the methods used to produce them) can be trusted. Someone either has covid or doesn't; there is either an environmental threat or there isn't; this new positive control plasmid is either acceptable or it isn't. In these cases frequentest ideology is something that is taken for granted because of how inherently powerful it is.
+
+So that is why the idea of NHST seems so natural to me. I want to make sure that the results I produced are the ones I wanted to produce, not due to some random chance.By generating a test statistic that represents random chance and comparing your results to that statistic you can be concretely certain about your results in a way that Bayesian inference would allow. 
+
+All that being said I have shifted my thinking during this course to conclude that Bayesian statistics and inference have a very valuable place in larger and more complex scenarios. If I want to know if someone has a disease or not, getting a posterior that defines the % chance of someone having the disease isn't super useful. In that case I want a "yes they have it" or "no they don't have it". 
+
+However I've come to respect just how powerful a tool a properly built posterior can be in systems that are more complex than just a "coin flip". Bayesian thinking is probably the best way to think about multi-parameter systems for whom a "true parameter" is either unknown or un-attainable. If we have a question that is complex, in a system that is complex, and we are perturbing it to see what happens I think the use of Bayesian analysis makes the most logical sense. In these cases we want to narrow our model down further and further until we are comfortable that it matches what is really happening. Doing this using likelihood and NHST is un-tenable: there is just too much system noise for us to determine what "random chance" even means! Bayesian updating and out-of-sample prediction using our posterior means that we take a more holistic view of the data and allows us to get a better handle of the system.
+
+Bayesian inference is also especially useful if we are comfortable speaking in terms of "% chance" of something occurring. This could be the probability of particle parameters at CERN or the probability of some member of a population getting a disease. Hearing that there is a % chance we will be infected as a member of a population is something we are comfortable with. However if your doctor came in and said there is a % chance you currently have the disease we are unsettled. This is where I stand between these two methods of analysis: smaller scale, concrete results are where frequentests shine but if you want to grapple with the larger questions you'll need to embrace the posterior. 
+
+# 4) Bayes Theorem
+
+### Question:
+
+What is the chance that the sun exploded given that the machine said yes?
+
+### First I want to define my terms:
+
+* Hypothesis (H) = Sun exploded
+
+* Data (D) = Machine said "Yes"
+
+* P(H) = Probability of the Sun exploding
+
+* P(D|H) = Likelihood of the machine saying "Yes" given that the Sun exploded
+
+* P(D) = Probability of the machine answering "Yes"
+
+### And the formula we need:
+
+P(H|D) = P(D|H)*P(H)/P(D)
+
+
+### Now we need to grab some numbers:
+
+We are given the probability of the sun exploding
+
+<b>P(H)</b>: .0001
+
+We are also given the likelihood of the machine saying "Yes" given that the sun exploded. Since the machine is (frustratingly) programmed to lie to us, there is a 1/36 chance that it rolls two sixes and misreports. This means that probability that it will say "Yes" given that the sun exploded is 35/36
+
+<b>P(D|H)</b>: 35/36
+
+The last term that we need is the probability of the machine saying "Yes".
+
+We can say the following:
+
+* The sun explodes and the machine says "Yes" = <b>P(D|H)</b> = 35/36
+
+* The sun doesn't explode and the machine says "Yes" = <b> P(D|!H) </b> = 1/36
+
+However these outcomes are dependent on the probability of the sun exploding P(H) or not exploding P(!H):
+
+* The sun explodes = <b> P(H) </b> = .0001
+
+* The sun doesn't explode = <b> P(!H) </b> = .9999
+
+So, put all together:
+
+#### P(D) = [P(H) * P(D|H)] + [P(!H) * P(D|!H)] 
+
+Now we'll do some actual calculations
+
+```{r Nova}
+
+#Calculate P(D)
+Pd <- (.0001 * 35/36) + (.9999 * 1/36)
+
+#Caluclate P(D|H)*P(H)
+num <- 35/36 * .0001
+
+#Calculate P(H|D)
+posterior <- num / Pd
+```
+
+So the probability that the sun exploded given that the machine said "Yes" is <b>`r round(posterior, digits = 4)`</b>
+
+# 4 EC) Why does XKCD hate frequentists?
+
+This comic is a representation of everything that is wrong with the interpretation of the results of frequentist analysis. In the last panel the "frequentist" concludes that since the probability of the machine saying "Yes" by random chance is 1/36, and since 1/36 < .05, then the hypothesis that the sun has exploded is true. This is a ridiculous conclusion to make for more than one reason.
+
+First, and probably most importantly, is the fact that "statistical significance" is not "real significance". Just because some 19th century quality assurance analyst determined that a p-value below .05 is "statistically significant" doesn't mean that the Sun go the memo and decided to play along. The main problem with our "frequentist" concluding the sun has exploded is that he is using a completely unacceptable alpha for his analysis. For something as infrequent and improbable as the Sun literally going supernova you can't use the same analysis parameters that you would to determine what color shoes the average 8 year old likes most.
+
+In this case we need to narrow that down to something reasonable for the situation we are analyzing. If we lower our alpha, I don't think 5-alpha significance would be ridiculous here for example, we can reduce our type-1 error chance while still maintaining a good power (falesly confirming the Null is pretty hard to do for the sun going kaboom). Given that we can more reasonably conclude that no, the Sun as most likely not gone up in smoke.
+
+Another smaller point is this comic also gets at the common misuse of p-value and alternative hypothesis confirmation. The only thing that the p-value says is whether or not we can confidently say that the results we are looking at are not caused by chance. It doesn't say if we can confidently say our alternative hypothesis is correct. In this comic the "frequentist" doesn't reject the Null, they accept the alternative hypothesis. It's definitely more subtle than the alpha argument but it's frustrating because it's such a common-place assumption to make.
+
+Finally my last point is that p-value tends to rise as the number of samples increases. In this case we have an n = 1 which will inherently produce a lower p-value than if n = 100. In the comic, the "frequentist" happily takes this result with no qualifications before going on to butcher frequentist analysis. However, we really can't use just the one data point we need to (frequently) repeat the test more times in order to get at a reliable p-value.
+
+# 5) Let's do some modeling
+
+First I'm going to load up the data
+```{r load_morph}
+#For safety
+setwd(here::here())
+
+#Load in our brain data
+morph <- read.csv("data/Morphology_data.csv") %>% 
+  na.omit() 
+
+#Check the data to make sure we dropped the NA's
+vis_dat(morph)
+
+
+```
+
+## 5a) Fit the relationship that describes how Tarsus length predicts upper beak (Culmen) length using least squares, likelihood, and Bayesian techniques, then verify assumptions
+
+First I'll start with a graph of the relationship to visualize it
+```{r first_look}
+
+#plot Tarsus length vs Culmen length
+ggplot() +
+        geom_point(data = morph,
+                   mapping = aes(x = Tarsus..mm.,
+                                 y = Culmen..mm.))
+
+```
+So at first blush it looks like there is definitely a relationship here.
+
+Next I'll fit our three model types to the data
+
+```{r model_creation}
+#Least squares regression model
+morph_lm <- lm(Culmen..mm. ~ Tarsus..mm.,
+               data = morph)
+
+#Likelihood regression model (using a normal distribution)
+morph_like <- glm(Culmen..mm. ~ Tarsus..mm.,
+                  data = morph,
+                  family = gaussian(link = "identity"))
+
+#Bayesian regression model (2 chains so my computer doesn't catch fire)
+
+morph_bayes <- brm(Culmen..mm. ~ Tarsus..mm.,
+                   data = morph,
+                   family = gaussian(link = "identity"),
+                   chains = 2)
+
+```
+
+Now it's time to verify the assumptions for each fit. I'll begin with Least squared assumption testing.
+
+### First I'll start with a residual vs fitted plot
+```{r LM_Res}
+#Plot the residuals vs the fitted data to see if there is a pattern
+#Least Squares
+plot(morph_lm, which = 1,
+     sub = "Least Sqauares")
+```
+
+For the least squares we can see a roughly horizontal, random distribution of points around the 0 line, suggesting a linear, homoskedastic relationship. 
+
+Next we'll take a look at the QQ plot
+
+```{r lm_QQ}
+#Plot the QQ data to see if there is a pattern
+#Least Squares
+plot(morph_lm, which = 2,
+     sub = "Least Squares Regression")
+```
+
+This provides evidence that there is a normally distributed, linear relationship between X and Y (based on how close their quantiles fall in this QQ plot). So this plot supports the assumption of bivariate normal distribution.
+
+The other assumption we need to confirm is that there isn't a largely influential outlier skewing our model. First lets look at the cooks distance
+
+```{r lm_cooks}
+plot(morph_lm, which = 4)
+```
+
+And we can see that there isn't any significant outliers. 
+
+As far as a least squares regression model is concerned we should feel comfortable that our assumptions have been met
+
+### Likelihood Assumption Testing
+
+Because all three of these models are linear models the same assumptions that held for least squares should hold for the likelihood and bayes models, assuming that the models are well behaved.
+
+I can look at the same assumption testing like this:
+
+```{r like_test}
+#Residuals vs Fitted
+plot(morph_like, which = 1)
+
+#QQ
+plot(morph_like, which = 2)
+
+#Cook's
+plot(morph_like, which = 4)
+```
+But again its going to be identical to the least squared graphs. 
+
+What likelihood modeling does need to check, however, is that our likelihood profile is well behaved. A good way to do this is to model the deviance profile of our model and ensure that it looks parabolic 
+
+```{r profile_model}
+library(profileModel)
+prof <- profileModel(morph_like,
+                     objective = "ordinaryDeviance")
+plot(prof)
+```
+
+Great, looks like a nice parabolic curve so we know that the model maintained linearity.
+
+We can double check this linear relationship with by making a profile object to find tau (we can use this object later to make confidence intervals a bit easier as well):
+
+```{r mass_check}
+library(MASS)
+#Ensure that we have a linear relationship in our model
+like_mass <- profile(morph_like)
+plot(like_mass)
+```
+
+And we can see we have nice straight lines.
+
+I think we can say confidently that we have shown our assumptions have been met for the likelihood model
+
+### Bayesian assumption testing
+
+So again we've confirmed a couple of times now that our basic assumptions required for linear modeling have been met. For Bayesian models I'll do this a little bit differently.I'm going to start with some basic diagnostics for bayesian models.
+
+First I'll plot the posteriors and chains to make sure that we see chain overlap and posterior convergence
+
+```{r bayes_plot}
+
+#Plot the posteriors generated by our Bayesian model
+plot(morph_bayes)
+```
+
+Here we can see really nice looking posterior distributions that all show convergence. The chains for our posteriors are also well behaved with good overlap and no "searching"
+
+Next I'll verify that we for sure show convergence with Rhat. Since we've already confirmed the assumption of normally distrbuted variance we can use Rhat to determine if convergence is met. If the Rhat is close to 1 then we know that the two chains are indistinguishible and convergence has been reached.
+
+```{r morph_rhat}
+#Get the rhat for model posteriors
+rhat(morph_bayes)
+
+#plot it to visualize that everything equals 1
+library(bayesplot)
+rhat(morph_bayes) %>% mcmc_rhat()
+```
+
+Ok and finally I'll make sure that autocorrelation isn't a problem by charting correlation charts and making sure they drop to 0. This shouldn't be a problem because BRMS is based on HMC, which isn't subject to autocorrelation to the same extent that MCMC is.
+
+```{r morph_ac}
+#plot the autocorrelation plots to make sure we aren't autocorrelating
+library(bayesplot)
+mcmc_acf(morph_bayes)
+```
+
+Autocorrelation looks good!
+
+We can also check the fit really quick
+```{r pp_check}
+pp_check(morph_bayes, "dens_overlay")
+```
+
+## 5b) Three interpretations
+
+So for the interpretations of each of these models I'll need to get the coefficients and error for each model and compare them
+
+```{r interpret}
+#Get the lm coefficients and error
+lm_info <- summary(morph_lm)
+
+#Get the coefficients and error of the likelihood profile
+like_info <- summary(morph_like)
+
+#Get the Bayesian coefficients and error
+bayes_info <- summary(morph_bayes)
+
+lm_info
+
+like_info
+
+bayes_info
+
+info_table <- tribble(
+  ~statistic, ~lm, ~like, ~bayes,
+  "Intercept Coefficient", -.099, -.099, -.09,
+  "Intercept Error", .215, .215, .21,
+  "Tarsus..mm. Coefficient", .373, .373, .37,
+  "Tarsus..mm. Error", .006, .006, .01)
+
+#Display our data
+gt(info_table) %>% 
+  
+  #Set up the tab header
+  tab_header(
+    title = "Comparison Summary") %>% 
+  
+  #Align it to the center
+  opt_align_table_header(align = "center") %>% 
+
+  #Stripe the rows to make it more readable
+  opt_row_striping(row_striping = TRUE)
+```
+
+I've gone ahead and created a summary chart of the relevant information. As we can see we get pretty equivalent results from each of our different models.
+
+The Least Squares model is showing us that the estimates of the population parameters that describe the relationship between our predictor (Tarsus) and our response (Culmen). 
+
+The likelihood model is showing us the parameter estimates based on maximizing our likelihood function so that under our model our observed data is most probable. In this case it came to the same conclusion that our least squares model did.
+
+The Bayesian model is giving us the probability distributions for each of the parameters and is outputting the value that has the highest chance of being true given our observed data.
+
+In the end all three of these models are, in their own unique ways, agreeing that the linear regression parameters are what is output in that table. 
+
+## 5c) Everyday I'm Profilin'
+
+We've already seen taht our likelihood profiles are well behaved but now we'll use grid sample to create a profile
+
+```{r morph_grid}
+#create a likelihood function to figure out the predictor 
+likhood_fun <-  function(slope, intercept, res_sd){
+  
+  #Our linear regression formula
+  morph_form <-  intercept + slope * morph$Tarsus..mm.
+  
+  #Sum our results (log likelihood)
+  sum(dnorm(morph$Culmen..mm., morph_form, res_sd, log = TRUE))
+}
+
+#Create our data generation across our variables
+morph_dist <-  crossing(slope = seq(0,1, by = .001),
+                       intercept = seq(-2,2, by = .1)) %>% 
+  #Go through it rowwise
+  rowwise() %>% 
+  
+  #Add on a log likelihood and deviance columns
+  mutate(loglik = likhood_fun(slope, intercept, sd(morph_like$residuals)),
+         deviance = -2 * loglik) %>% 
+  ungroup()
+
+
+#Here's our MLE
+morph_MLE <-  morph_dist %>% 
+filter(loglik == max(loglik))
+
+#Check it out
+morph_MLE
+
+#Plot our surface
+ggplot(data= morph_dist,
+       mapping = aes(x=slope,
+                     y=intercept,
+                     fill = loglik)) +
+  geom_raster() +
+  scale_fill_viridis_c()
+
+
+#Checking through the grid sampling for the MLE of slope
+slope_like <- morph_dist %>% 
+  
+  #Isolate for slope
+  group_by(slope) %>%
+  
+  #Find the MLE
+  filter(deviance == min(deviance)) %>% 
+  ungroup()
+
+#here's my profile for slope
+ggplot(slope_like,
+       aes(x = slope, y = loglik))+
+  geom_point()
+
+#get the confidence intervals
+upr_ci_95 <- morph_dist %>% 
+  filter(loglik >= max(loglik)- qchisq(.95 , df = 1)/2) %>% 
+  as.data.frame() %>% head()
+
+lwr_ci_95 <- morph_dist %>% 
+  filter(loglik >= max(loglik) - qchisq(.95 , df = 1)/2) %>% 
+  as.data.frame() %>% tail()
+
+upr_ci_80 <- morph_dist %>% 
+  filter(loglik >= max(loglik)- qchisq(.80 , df = 1)/2) %>% 
+  as.data.frame() %>% head()
+
+lwr_ci_80 <- morph_dist %>% 
+  filter(loglik >= max(loglik) - qchisq(.80 , df = 1)/2) %>% 
+  as.data.frame() %>% tail()
+
+
+#verify it with profilemodel for 95 CI and 80 CI
+verify_95 <- profileModel(morph_like,
+                        objective = "ordinaryDeviance",
+                        quantile = qchisq(.95,1))
+
+verify_80 <- profileModel(morph_like,
+                        objective = "ordinaryDeviance",
+                        quantile = qchisq(.80,1))
+#Plot our 95 CI and 80CI profiles
+plot(verify_95)
+plot(verify_80)
+```
+
+So here is a variety of visualizations from a variety of sources but if we go down the list we can see that the likelihood function was used to calculate the slope and intercept using the residual SD of the model. 
+
+From there I decided to visualize the loglikelihood over slope and intercept to give a better idea of how the two interact.
+
+After that I grabbed the slope information (as we were asked to look for just the slope) and checked to make sure it has a nice parabolic profile. Next I calculated the confidence intervals both using qchisq and profileModel (which are plotted out as well)
+
+## 5d) THe power of the Prior
+First we want to prove that we have enough data to overwhelm a prior with a slope of .7 and an sd of .01.
+
+```{r new_bayes}
+#Create our new bayes model, altering our prior
+new_prior <- brm(Culmen..mm. ~ Tarsus..mm.,
+                     data = morph,
+                     family = gaussian(link = "identity"),
+                     prior = c(prior(coef = "Tarsus..mm.",
+                                     prior = normal(.01,.7))),
+                     chains = 2)
+fixef(new_prior)
+default_prior <- fixef(morph_bayes)
+```
+
+As we can see we're really close from our new prior to our default prior from before.
+
+What about at different number of resamples?
+
+```{r lots_of_priors}
+#Create a single bootstrap
+diff_prior <- function(samples){
+  
+#Create our new bayes model
+new_prior <- brm(Culmen..mm. ~ Tarsus..mm.,
+                     data = samples,
+                     family = gaussian(link = "identity"),
+                     prior = c(prior(coef = "Tarsus..mm.",
+                                     prior = normal(.01,.7))),
+                     chains = 2)
+return(new_prior)
+}
+
+#Sample our data to grab some random samples for different values
+ten_dist <-  sample_n(morph, 10)
+one_hundred <- sample_n(morph, 100)
+three_hundred <- sample_n(morph, 300)
+five_hundred <- sample_n(morph, 500)
+
+#Generate our priors
+ten_prior <- diff_prior(ten_dist)
+one_hundred_prior <- diff_prior(one_hundred)
+three_hundred_prior <- diff_prior(three_hundred)
+five_hundred_prior <- diff_prior(five_hundred)
+
+#Grab our relevant data to plot vs our default regression
+ten_data <- fixef(ten_prior)
+one_hundred_data <- fixef(one_hundred_prior)
+three_hundred_data <- fixef(three_hundred_prior)
+five_hundred_data <- fixef(five_hundred_prior)
+
+#Visualize our lines for a 10 sample vs default
+ggplot(morph, 
+       mapping = aes(x = Tarsus..mm.,
+                     y = Culmen..mm.))+
+  geom_point()+
+    geom_abline(slope = ten_data[2,1],
+                intercept = ten_data[1,1],
+                color = "red",
+                size = 1,
+                alpha = .5)+
+      geom_abline(slope = default_prior[2,1],
+                intercept = default_prior[1,1],
+                color = "green2",
+                size = 1)+
+  labs(title = "10 Sample Prior")
+
+#Visualize our lines for a 100 sample vs default
+ggplot(morph, 
+       mapping = aes(x = Tarsus..mm.,
+                     y = Culmen..mm.))+
+  geom_point()+
+geom_abline(slope = one_hundred_data[2,1],
+                intercept = one_hundred_data[1,1],
+                color = "red",
+                size = 1,
+                alpha = .5)+
+      geom_abline(slope = default_prior[2,1],
+                intercept = default_prior[1,1],
+                color = "green2",
+                size = 1)+
+  labs(title = "100 Sample Prior")
+
+#Visualize our lines for a 300 sample vs default
+ggplot(morph, 
+       mapping = aes(x = Tarsus..mm.,
+                     y = Culmen..mm.))+
+  geom_point()+
+      geom_abline(slope = three_hundred_data[2,1],
+                intercept = three_hundred_data[1,1],
+                color = "red",
+                size = 1,
+                alpha = .5)+
+      geom_abline(slope = default_prior[2,1],
+                intercept = default_prior[1,1],
+                color = "green2",
+                size = 1)+
+  labs(title = "3000 Sample Prior")
+
+#Visualize our lines for a 500 sample vs default
+ggplot(morph, 
+       mapping = aes(x = Tarsus..mm.,
+                     y = Culmen..mm.))+
+  geom_point()+
+          geom_abline(slope = five_hundred_data[2,1],
+                intercept = five_hundred_data[1,1],
+                color = "red",
+                size = 1,
+                alpha = .5)+
+      geom_abline(slope = default_prior[2,1],
+                intercept = default_prior[1,1],
+                color = "green2",
+                size = 1)+
+  labs(title = "500 Sample Prior")
+
+#Display our default data
+gt(as.tibble(default_prior)) %>% 
+  
+  #Set up the tab header
+  tab_header(
+    title = "default regression") %>% 
+  
+  #Align it to the center
+  opt_align_table_header(align = "center") %>% 
+
+  #Stripe the rows to make it more readable
+  opt_row_striping(row_striping = TRUE) 
+
+#Display our 10 data
+gt(as.tibble(ten_data)) %>% 
+  
+  #Set up the tab header
+  tab_header(
+    title = "10 sample regression") %>% 
+  
+  #Align it to the center
+  opt_align_table_header(align = "center") %>% 
+
+  #Stripe the rows to make it more readable
+  opt_row_striping(row_striping = TRUE)
+
+#Display our 100 data
+gt(as.tibble(one_hundred_data)) %>% 
+  
+  #Set up the tab header
+  tab_header(
+    title = "100 sample regression") %>% 
+  
+  #Align it to the center
+  opt_align_table_header(align = "center") %>% 
+
+  #Stripe the rows to make it more readable
+  opt_row_striping(row_striping = TRUE)
+
+#Display our 300 data
+gt(as.tibble(three_hundred_data)) %>% 
+  
+  #Set up the tab header
+  tab_header(
+    title = "300 sample regression") %>% 
+  
+  #Align it to the center
+  opt_align_table_header(align = "center") %>% 
+
+  #Stripe the rows to make it more readable
+  opt_row_striping(row_striping = TRUE)
+
+#Display our 500 data
+gt(as.tibble(five_hundred_data)) %>% 
+  
+  #Set up the tab header
+  tab_header(
+    title = "500 sample regression") %>% 
+  
+  #Align it to the center
+  opt_align_table_header(align = "center") %>% 
+
+  #Stripe the rows to make it more readable
+  opt_row_striping(row_striping = TRUE)
+```
+
+I chose to show the actual regression lines here with the different prior in red and the default in green.
+
+So as we can see our prior beings to being out weighed by the data somewhere between 300 and 500 samples being used. We can also see the trend between default values and the different sampled priors in the tables above.
+
+
+# 6) Cross-Validation and Priors
+Now we'll need to check the predictive ability of our models and specifically if the relationship is truley linear or not. To do this we'll try using cross-validation to see if we fit our data better with a linear model or if we fit it better with a higher order formula.
+
+I find the AIC table for our various models to be one of the best ways to see this fit
+
+```{r cv_models_AIC}
+
+
+#Create our new object
+morph_aic <- data.frame(polynomial = c(1:5),
+                          names = c("linear", 
+                                    "quadratic", 
+                                    "cubic", 
+                                    "quartic", 
+                                    "quintic")) %>% 
+  
+  #Go rowwise through it
+  rowwise() %>% 
+  
+  #Add each lm as a member of a list column
+  mutate(mods = list(lm(Culmen..mm. ~ poly(Tarsus..mm., polynomial),
+                    data = morph))) 
+
+#Calculate the AIC table
+aic_table <- aictab(cand.set = morph_aic$mods, 
+                    modnames = morph_aic$names)
+
+#Display our data
+gt(aic_table) %>% 
+  
+  #Set up the tab header
+  tab_header(
+    title = "AIC Table for different polynomial fits") %>% 
+  
+  #Align it to the center
+  opt_align_table_header(align = "center") %>% 
+
+  #Stripe the rows to make it more readable
+  opt_row_striping(row_striping = TRUE)
+
+ggplot(data = aic_table,
+       aes(x = Modnames,
+           y = AICc))+
+  geom_point()
+```
+
+Looking at this through the lens of AICc we can see that we still show the cubic model to be the best fit for this data as it shows the lowest AICc value. 
+
+As we can also see from this table, the AICc Weight for the cubic model is much much larger than any other model at 63%. This means that this model contains 63% of the "predictive power" that this set of models represents.
+
