@@ -1,0 +1,532 @@
+---
+title: "GLM Homework"
+author: "Quentin D'Arcy"
+output: 
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: true
+      smooth_scroll: true
+    theme: journal
+    highlight: tango
+---
+```{r load_stuff, echo = FALSE, results = "hide" }
+#I don't like how it looks with the full tidyverse output
+# when it loads here, so I'm going to suppress the messages
+options(tidyverse.quiet = TRUE)
+
+#I'll do the same thing for the summarize() function so it doesn't
+#report that it is ungrouping (again I don't like the look of it)
+options(dplyr.summarise.inform = FALSE)
+
+
+#load the tidyverse
+library(tidyverse)
+library(ggplot2)
+#Load the other necessary libraries
+library(rsample)
+library(boot)
+library(modelr)
+library(MASS)
+library(profileModel)
+library(AICcmodavg)
+library(emmeans)
+library(car)
+library(brms)
+library(bayesplot)
+library(tidybayes)
+#load gt for pretty tables
+library(gt)
+```
+
+# 1) Comparing Means
+
+## 1.1) LOad and plot the data
+First we'll load up the pinecone data and visualize it
+```{r pinecone_load}
+#For safety
+setwd(here::here())
+
+#Load in our brain data
+pinecone <- read.csv("data/pinecone_data.csv")
+
+#Visualize it
+head(pinecone)
+
+#Create a plot of the data
+pinecone_plot <- ggplot(data = pinecone,
+                        mapping = aes(x = habitat,
+                                      y = conemass,
+                                      fill = habitat))
+#Visualize it
+pinecone_plot +
+  geom_boxplot()
+
+```
+
+## 1.2) Fit a model using least squares and evaluate the relevant assumptions
+
+So first I'll fit the linear model and then I'll check to make sure that our assumptions for linear regression hold
+
+```{r model_it}
+
+#Create a model for this data using least squares
+pinecone_lm <- lm(conemass ~ habitat,
+               data = pinecone)
+```
+
+To check assumptions I'll start with a residuals vs fitted plot
+```{r LM_Res}
+#Plot the residuals vs the fitted data to see if there is a pattern
+plot(pinecone_lm, which = 1,
+     sub = "Least Sqauares")
+```
+
+For the least squares we can see a roughly horizontal, random distribution of points around the 0 line, suggesting a linear, homoskedastic relationship. 
+
+We can also plot them using the car library:
+
+```{r residual_plot}
+
+residualPlots(pinecone_lm)
+```
+Next we'll take a look at the QQ plot
+
+```{r lm_QQ}
+#Plot the QQ data to see if there is a pattern
+plot(pinecone_lm, which = 2,
+     sub = "Least Squares Regression")
+```
+
+This isn't perfect but does provide evidence that there is a normally distributed, linear relationship between X and Y (based on how close their quantiles fall in this QQ plot). I think that this plot supports the assumption of bivariate normal distribution but we need to keep checking.
+
+The other assumption we need to confirm is that there isn't a largely influential outlier skewing our model. First lets look at the cooks distance
+
+```{r lm_cooks}
+plot(pinecone_lm, which = 4)
+```
+
+This looks pretty good, there's no really strong outliers look at this but lets just make sure that the leverage graph lines up with this
+
+```{r leverage_plot}
+
+#Plot the leverage of the data
+plot(pinecone_lm, which = 5)
+```
+
+With this confirmation we can comfortably say that our assumptions required for our least squares regression model have been met.
+
+## 1.3) How much variation is explained by your model?
+
+In order to find this out we want to run an F-test on our data to see what proportion of the variation is explained by the model vs how much is explained by random noise
+
+```{r F-Test}
+#Find the r-squared value
+summary(pinecone_lm)
+```
+Based on the r-squared value we can say that ~88% of the variation in conemass is due 
+Looking at this table we can see that the F value for habitat is very very high at 50, which leads to a very low p-value (like reallllllly low). This means that the chance that the variation in our data is explained by random chance (i.e., the chance that we can verify our null hypothesis) is very small, approaching a 0% chance.
+
+## 1.3) Compare the means!
+
+Now we can go through and compare the estimated means of our model to each treatment
+
+```{r means_compare}
+
+#Grab the estimated means of our model
+pinecone_em <- emmeans(pinecone_lm,
+                         specs = ~ habitat,
+                       method = "tukey",
+                       adjust = "none")
+
+#Visualize the contrast between the estimated means
+contrast(pinecone_em) %>% 
+  plot() +
+  geom_vline(xintercept = 0, color = "red")
+
+#Display our em means data
+gt(as.tibble(contrast(pinecone_em))) %>% 
+  
+  #Set up the tab header
+  tab_header(
+    title = "Estimated Mean Pinecone mass between habitats") %>% 
+  
+  #Align it to the center
+  opt_align_table_header(align = "center") %>% 
+  #Stripe the rows to make it more readable
+  opt_row_striping(row_striping = TRUE) 
+
+```
+Here we can see that the estimate of island.absent is significantly different than the two estimations for the mainland and island present habitats. In this cause I actually chose not to preform a p-value correction because the data that we are using is only n = 16, which is just not large enough a dataset to require correction. In this case I feel that any attempt at stat correction would not only be unnecessary but could potentially skew the results due to the low sample size. 
+
+#2) Comparing Means from Multiple Categories
+
+Now we'll use some data from a 2020 factorial study on the effect of predation on invertebrate levels in panels that are either caged or uncaged and placed on the side of a cinderblock or hanging on a piece of PVC attached to the block (giving predators less access).
+
+## 2.1) Load and plot the data
+Same as before, lets load up the data and take a look
+
+```{r coverage_data}
+#For safety
+setwd(here::here())
+
+#Load the data
+coverage <- read.csv("data/transplant_data.csv")
+
+#Plot it
+#Create a plot of the data
+coverage_plot <- ggplot(data = coverage,
+                        mapping = aes(x = Caged,
+                                      y = Change.in.Cover,
+                                      fill = Position.On.Block))
+#Visualize it
+coverage_plot +
+  geom_boxplot()
+
+```
+## 2.2) Fit a model using likelihood and evaluate all relevant assumptions
+
+So this time instead of using the least squares regression model we'll be using the likelihood regression model
+
+```{r like_model}
+#Likelihood regression model
+coverage_glm <- glm(Change.in.Cover ~ Caged*Position.On.Block,
+                    data = coverage,
+                    family = gaussian(link = "identity"))
+```
+
+Now we can test this similarly to the previous model, except this time we'll also have to verify that our model profile is well behaved
+
+First the usual suspects
+
+```{r like_test}
+#Residuals vs Fitted
+plot(coverage_glm, which = 1)
+#QQ
+plot(coverage_glm, which = 2)
+#Cook's
+plot(coverage_glm, which = 4)
+```
+We can see that this data doesn't meet the required assumptions for a linear regression.
+
+First the Residuals vs Fitted plot looks OK, maybe a leaning a little bit negative for the last group and a little positive for the first group.
+
+Next, and probably clearest, the qq plot doesn't look like a nice, straight line. Instead we can see the data only resembles linearity in the middle around 0. Towards the ends it starts to diverge pretty significantly around 1,-1
+
+Finally we can see a rather large outlier in the Cook's distance at point 30.
+
+To test the normality of this model we can also run a Shapiro-Wilks normality test on our residuals. This is an NHST where the null hypothesis is that our residuals are normally distributed (assuming an alpha of .05)
+
+```{r SW_TEST}
+#Run a Shapiro-Wilks test on the residuals
+shapiro.test(residuals(coverage_glm))
+
+```
+Here we can see that our p-value is low enough to reject the null that our residuals are normally distributed.
+
+We can also assess our model's profile to see if those are well behaved. If they aren't it provides more support for us chucking this model out. However, if they are well behaved it suggests that this model is at least internally valid.
+
+```{r profile_model}
+library(profileModel)
+prof <- profileModel(coverage_glm,
+                     objective = "ordinaryDeviance")
+plot(prof)
+```
+
+The curve looks ok but we can check linearity by checking the tau chart:
+
+```{r mass_check}
+library(MASS)
+#Ensure that we have a linear relationship in our model
+like_mass <- profile(coverage_glm)
+plot(like_mass)
+```
+
+So it looks like the model passes the profile check, however because of all the previous assumption violations any inferences we derive from this model are going to be inaccurate.
+
+## 2.3) Fix our model
+
+Now that we know that our original model isn't passing our necessary assumptions for linear regression we need to alter it to make it work. We'll try to do this three ways to get around the strangeness of % change data
+
+### a) Covariate with intial cover
+By adding Initial Cover as a covariate we can normalize a baseline for our % data, hopefully removing the outlier(s). 
+
+```{r cover_covariate}
+#Likelihood regression model
+covariate_glm <- glm(Change.in.Cover ~ Caged*Position.On.Block+Initial.Cover,
+                    data = coverage,
+                    family = gaussian(link = "identity"))
+```
+
+Now we can take another look at the assumptions
+
+```{r covariate_test}
+#Residuals vs Fitted
+plot(covariate_glm, which = 1)
+#QQ
+plot(covariate_glm, which = 2)
+#Cook's
+plot(covariate_glm, which = 4)
+
+#Shapiro Test
+shapiro.test(residuals(covariate_glm))
+```
+Lets take a look at our assumptions:
+
+* So we've done a good job here linearizing the QQ plot but we are still seeing data point 30 as a significant outlier in the Cook's distance plot. 
+
+* The residuals vs fitted plot looks pretty good but it does seem to skew just a little positive.
+
+* Finally the Shapiro test came out with a p-value much lower than .05, suggesting we can reject the null hypothesis of residual normal distribution
+
+Overall this honestly isn't a bad fix. I do, however, have a sneaking suspicion that the Shapiro test is a skewed towards the low p-value we see here because of that one data point, point 30. Just out of curiosity....
+
+```{r remove_outlier}
+#Remove point 30 from the data set and test assumptions again
+minus_30 <- coverage[-c(30),]
+
+#Likelihood regression model
+minus_30_glm <- glm(Change.in.Cover ~ Caged*Position.On.Block+Initial.Cover,
+                    data = minus_30,
+                    family = gaussian(link = "identity")) 
+
+#Residuals vs Fitted
+plot(minus_30_glm, which = 1)
+#QQ
+plot(minus_30_glm, which = 2)
+#Cook's
+plot(minus_30_glm, which = 4)
+
+
+#Shapiro Test
+shapiro.test(residuals(minus_30_glm))
+```
+
+As suspected, the assumption check passes with flying colors with this model minus the apparent outlier. 
+
+That being said I want to be really careful removing outliers from a dataset this small. How do I know that this is actually an outlier and not a segment of the population that I just sampled poorly?? 
+
+I think that I might run in to some external validity issues by forcing the data to meet my assumptions this perfectly.
+
+In this case I'd rather try fitting some other models that may be able to better incorporate ALL the data, not just MOST of the data.
+
+### b) Divide the % cover by the initial cover
+
+By dividing the % cover by the initial cover we can speak in terms of relative changes
+
+```{r cover_division}
+#Likelihood regression model
+division_glm <- glm(Change.in.Cover/Initial.Cover ~ Caged*Position.On.Block,
+                    data = coverage,
+                    family = gaussian(link = "identity"))
+```
+
+Now we can take another look at the assumptions
+
+```{r division_test}
+#Residuals vs Fitted
+plot(division_glm, which = 1)
+#QQ
+plot(division_glm, which = 2)
+#Cook's
+plot(division_glm, which = 4)
+
+#Shapiro Test
+shapiro.test(residuals(division_glm))
+```
+Lets take a look at our assumptions:
+
+* Our residual vs fitted plot looks great here, nice and evenly distributed around that 0 line 
+
+* The QQ plot doesn't look quite as nice as it did in the covariate model but I would say it looks better than the original model.
+
+* The Cook's distance plot is the most improved here, incorporating that problem child point much better than the covariate model.
+
+* The Shapiro test for this one came out validating the null hypothesis of normally distributed residuals, something the first model wasn't able to do. This is likely due to the lack of strong outliers.
+
+This is another pretty solid fix. Unlike the covariate fix our QQ plot is pretty wacky, which is a problem and may disqualify the model from passing assumptions. However, the other plots and the Shapiro test all suggest that the data is homoscedastic with no major outliers. 
+
+
+### c) Log the cover change and use that as our response variable
+
+By log transforming the percent change we can (hopefully) linearize it and pass linear regression assumptions
+
+```{r cover_log}
+
+#Create our response variable
+coverage <- coverage %>% 
+  rowwise() %>% 
+  mutate(percent_change = logit(Initial.Cover) - logit(Final.Cover))
+
+#Likelihood regression model
+log_glm <- glm(percent_change ~ Caged*Position.On.Block,
+                    data = coverage,
+                    family = gaussian(link = "identity"))
+```
+
+Now we can take another look at the assumptions
+
+```{r log_test}
+#Residuals vs Fitted
+plot(log_glm, which = 1)
+#QQ
+plot(log_glm, which = 2)
+#Cook's
+plot(log_glm, which = 4)
+
+#Shapiro Test
+shapiro.test(residuals(log_glm))
+```
+Here we can see we have the same kind of problems as the original:
+
+* The residual vs fitted graph shows a lot of skew in the data around the 0 line
+
+* The QQ plot looks better but still has some tails that do their own thing
+
+* The Cook's Distance plot shows a rather significant outlier in point 8 (but does get rid of the problem with point 30, so there's that)
+
+* The Shapiro test shows that the null hypothesis of normally distributed residuals can be rejected
+
+---
+
+Overall I think that the best solution to this would be the first covariate model. Even though it was a problem with a single outlier it does fit the majority of the data very well. The QQ plot for the covariate model shows the most linearity and all the other points in the model don't show undue leverage. 
+
+Additionally, as demonstrated, removing the large outlier makes this model line up pretty much perfectly with the data. It would be nice to have more data or to maybe re-sample to see if the data point was indeed an outlier or if our original experiment suffered from sampling error.
+
+
+## 2.4 Using NHST with an alpha of .08, what does this fit model tell us about whether predation matters in this system?
+
+```{r anova_check}
+
+#Run an anova
+Anova(covariate_glm)
+```
+Assuming an alpha of .08 there's a couple of different things we can say based on our ANOVA results:
+
+* Whether or not a panel is caged has a significant effect on predation and the subsequent change in invertebrate cover of that panel
+
+* The position of the panels on the block (either on the side or hanging) has a significant effect on predation and the subsequent change in invertebrate cover of those panels.
+
+* The is no significant interaction between being the caged treatment and the position treatment (i.e., being caged and hanging is not significantly different than being caged or hanging)
+
+
+# 3 Rat Castes, mass, and their energy levels
+
+## 3.1 Load the data and check assumptions
+We'll do a Bayesian model this time (I will assume interaction in this model)
+```{r bayes_data}
+
+#For safety
+setwd(here::here())
+
+#Load the data
+rats <- read.csv("data/rat_data.csv")
+
+#Plot it
+#Create a plot of the data
+rat_plot <- ggplot(data = rats,
+                   mapping = aes(x = lnmass,
+                                 y = lnenergy,
+                                 fill = caste,
+                                 color = caste))
+#Visualize it
+rat_plot +
+  geom_point()+
+  stat_smooth(method = "lm")
+
+#Create the BRM
+rat_brm <- brm(lnenergy ~ lnmass*caste,
+               data = rats,
+               family = gaussian(link = "identity"),
+               chains = 2)
+```
+
+Now that we have our model we can check out assumptions
+
+```{r brm_check}
+
+#Plot the posteriors
+plot(rat_brm)
+
+#Check the rhat scores
+rhat(rat_brm) %>% mcmc_rhat()
+
+#Make sure we don't show autocorrelation
+mcmc_acf(rat_brm)
+
+#visualize our fit
+pp_check(rat_brm, "dens_overlay")
+
+```
+
+All of these looks pretty good!
+
+Our posteriors have a nice shape and our chains converge, our rhat is close to 1 (another indicator of convergence), we see all our ACF graphs drop to 0 nicely so there's no auto-correlation, and the fit looks like it is pulling in the prominent features of the data.
+
+## 3.2 Use LOO CV to decide if there is an interaction of not
+We will create another model that DOESN'T assume interaction and we'll compare the two
+
+```{r rat_loo}
+#Create the new non-interaction model
+norat_brm <- brm(lnenergy ~ lnmass+caste,
+               data = rats,
+               family = gaussian(link = "identity"),
+               chains = 2)
+
+#Create a LOO object for each model
+rat_loo <- loo(rat_brm)
+norat_loo <- loo(norat_brm)
+
+#compare the two and see which most closely resembles the data
+loo_compare(rat_loo, norat_loo)
+
+```
+
+Based on the comparison between these two cross validation objects we can see that the no-interaction model better matches our data.
+
+## 3.3 Compare the two castes energy expendeture at the meanlevel of log mass
+
+```{r est_means}
+
+#Get the estimated means for each group in our model
+emmeans(norat_brm, ~caste, method = "tukey")
+
+#Compare the difference between the groups visually 
+emmeans(norat_brm, ~caste) %>% 
+  plot(contrast(method = "tukey"))
+
+```
+
+We can see that there is definitely a difference between the two castes' energy expenditure at their mean lnlmass with the worker's energy expenditure being higher than the lazy rats energy expenditure. 
+
+Additionally we can see that there is no overlap between our hardest working lazy rat and our laziest worker rat which means that there is a distinct difference between the two castes. 
+
+In this case we could say that this model estimates that the worker caste's energy expenditure at the mean logmass is significantly higher than that of the lazy caste's energy expenditure at the mean logmass.
+
+## 3.4) Plot the fit model
+Now we can visualize the model
+
+```{r bayes_fit}
+#use emmeans to generate our predictions with a 100 lnmass sequence
+rats_newfit <- emmeans(norat_brm, specs = ~ caste + lnmass,
+                        at = list(lnmass = seq(3.5,5.5, length.out = 100))) %>%
+  
+  #change it to a tibble
+  as_tibble() %>%
+  
+  #create an lnenergy column to plot the emmeans
+  mutate(lnenergy = emmean)
+
+#plot our 1) data, 2) fit lines, 3) our CI's
+ggplot(data= rats,
+       aes(x = lnmass,
+           y = lnenergy,
+           color= caste)) +
+  geom_point() +
+  geom_line(data = rats_newfit) +
+  geom_ribbon(data= rats_newfit,
+              aes(ymin= lower.HPD, ymax= upper.HPD, group=caste),
+              alpha = 0.1, color = "lightgrey")+
+  theme_tidybayes()
+
+```
